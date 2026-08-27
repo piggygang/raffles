@@ -1,0 +1,66 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: dark;
+
+  --canvas: #0b0710;
+  --surface: #17101f;
+  --surface-raised: #211729;
+  --line: #2f2338;
+  --ink: #f7f1f6;
+  --ink-muted: #a99cb0;
+  --brand: #ff5fa2;
+  --brand-strong: #ff2d7e;
+  --gold: #ffd166;
+}
+
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-line: var(--line);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-brand: var(--brand);
+  --color-brand-strong: var(--brand-strong);
+  --color-gold: var(--gold);
+
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+
+  --radius-card: 1.25rem;
+}
+
+body {
+  background: var(--canvas);
+  color: var(--ink);
+}
+
+/* The only overlay in the app is a native <dialog>, which renders in the top
+   layer — so it needs no z-index, but its backdrop needs painting. Matches the
+   sticky header's translucent-canvas treatment. The colour is --canvas spelled
+   out: ::backdrop only began inheriting custom properties recently, and a
+   var() that fails to resolve here means an invisible scrim. */
+::backdrop {
+  background: rgb(11 7 16 / 0.8);
+  backdrop-filter: blur(4px);
+}
+
+/* The header nav scrolls horizontally on small screens; hide the scrollbar
+   without losing the scrolling itself. */
+@utility no-scrollbar {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Transaction toasts enter with a small rise; the base state is the finished,
+   static card, and the animation only runs under motion-safe. No exit
+   animation — it is not worth the exit-state bookkeeping. */
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.5rem);
+  }
+}

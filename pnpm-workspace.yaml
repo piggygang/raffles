@@ -1,0 +1,5 @@
+allowBuilds:
+  # Unlike dressme, sharp builds here: prize NFT images will be remote, which
+  # is exactly what next/image optimisation is for.
+  sharp: true
+  unrs-resolver: false
