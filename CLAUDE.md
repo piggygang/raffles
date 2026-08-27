@@ -23,7 +23,7 @@ No test framework is configured.
 
 ## Architecture
 
-Next.js 16.3.0 App Router project with TypeScript strict mode and React 19, cloned from dressme's skeleton so the org's apps share one look. The product spec and system architecture live in `docs/` (`piggygang-raffles-v1-spec.html`, `piggygang-raffles-architecture.html`) — the spec is signed off and the architecture doc names the backends: reads come from the indexer's public `/v1` API (arrives with the raffle pages), writes are browser-signed transactions straight to RPC.
+Next.js 16.3.0 App Router project with TypeScript strict mode and React 19, cloned from dressme's skeleton so the org's apps share one look. The product spec and system architecture live in `docs/` (`piggygang-raffles-v1-spec.md`, `piggygang-raffles-architecture.md`) — the spec is signed off and the architecture doc names the backends: reads come from the indexer's public `/v1` API (arrives with the raffle pages), writes are browser-signed transactions straight to RPC.
 
 - Routes live in `app/` at the repo root (no `src/`). `app/layout.tsx` loads Geist fonts via `next/font/google`; theme tokens live in `app/globals.css` (Tailwind v4 `@theme inline` — there is no tailwind.config). Path alias `@/*` maps to the repo root.
 - Layouts/pages use Next 16's generated route-typed props (`LayoutProps<"/">`) as ambient globals; `pnpm exec next typegen` generates them without a full build.
