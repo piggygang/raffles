@@ -140,7 +140,7 @@ No label here, unlike `CreatorEntry`. Collection and token names come from metad
 
 ## §4 — Admin instructions
 
-Every instruction here is open while the program is paused, per the spec §10 pause matrix. Every admin signer check is `signer == config.authority`. The authority pays rent on add and receives it on close. On mainnet that account is the Squads vault, so the vault needs a small SOL balance (§6).
+Every instruction here is open while the program is paused, per the spec §10 pause matrix. `set_authority` and the four registry instructions check `signer == config.authority`. The two exceptions are `init_config`, which requires the program's upgrade authority, and `accept_authority`, which requires `pending_authority`. The authority pays rent on add and receives it on close. On mainnet that account is the Squads vault, so the vault needs a small SOL balance (§6).
 
 | Instruction | Signer | Args | Validation | Effect | Event |
 | --- | --- | --- | --- | --- | --- |
@@ -149,7 +149,7 @@ Every instruction here is open while the program is paused, per the spec §10 pa
 | `accept_authority` | `pending_authority` | — | `pending_authority != default` and signer matches it | `authority = pending_authority`; `pending_authority = default` | `AuthorityAccepted` |
 | `creator_add` | `authority` | `wallet: Pubkey`, `label: [u8; 32]` | `wallet != default`; label is non-empty, valid UTF-8 after trimming zero padding | `init` CreatorEntry. Fails if it already exists, so duplicates are loud. | `CreatorAdded` |
 | `creator_remove` | `authority` | `wallet: Pubkey` | Entry exists at its seeds | `close` CreatorEntry → rent to `authority` | `CreatorRemoved` |
-| `allowlist_add` | `authority` | `kind: u8`, `address: Pubkey` | `kind ∈ {0, 1}`. `address_account.key == address`, owned by the **classic SPL Token program**, and unpacks as an initialized `Mint`. For `Collection`, also `decimals == 0`. | `init` PrizeEntry. Fails if it already exists. | `PrizeAllowlisted` |
+| `allowlist_add` | `authority` | `kind: u8`, `address: Pubkey` | `kind ∈ {0, 1}`. `address_account.key == address`, owned by the **classic SPL Token program**, and unpacks as an initialized `Mint`. For `Collection`, also `decimals == 0`. The admin attests that a `Collection` address is a Metaplex Certified Collection mint; the program does not check certification on-chain. | `init` PrizeEntry. Fails if it already exists. | `PrizeAllowlisted` |
 | `allowlist_remove` | `authority` | `kind: u8`, `address: Pubkey` | Entry exists at its seeds | `close` PrizeEntry → rent to `authority` | `PrizeDelisted` |
 
 The `allowlist_add` owner-and-shape check catches the common admin mistake of pasting a wallet, a marketplace slug or a Token-2022 mint. It cannot judge whether a collection is reputable. That judgement stays with the humans (§7 vetting checklist).
@@ -374,7 +374,7 @@ Mechanical additions the spec didn't spell out. Product semantics are unchanged.
 | --- | --- | --- |
 | Spec §3 actor table, §10 | `whitelist_*` instructions | `allowlist_add` / `allowlist_remove`, R11 applied to code identifiers. `creator_add` / `creator_remove` are unchanged. |
 | Spec §3, §10, E-A5 | `set_authority` (one step) | `set_authority` proposes and the new **`accept_authority`** instruction completes. This adds one instruction to the inventory. |
-| Spec — silent | `init_config` caller unspecified | Gated to the program's upgrade authority |
+| Spec §3 actor table, §10 | `init_config` signed by the DAO admin, with authority moved to Squads afterwards | Still the DAO admin's bootstrap step, with one new requirement: the signer must be the program's upgrade authority (§6) |
 | Spec §10 | "Registry mutations … multisig-signed" | On mainnet. Devnet and localnet use a single keypair authority. |
 | Spec §7 account model | "Creator Registry — PDA per approved wallet", "Prize Allowlist — PDA per collection / mint" | Unchanged, now with seeds and layouts (§3) |
 
