@@ -389,7 +389,7 @@ Mechanical additions the spec didn't spell out. Product semantics are unchanged.
 | RD5 | Admin prize bypass | bypass · none | none | Every escrowed prize passed the allowlist, without exception; bundling costs one instruction |
 | RD6 | Admin authority | single key · Squads v4 | Squads v4 vault on mainnet; single key on devnet/localnet | Confirms spec §10/E-A5; the protection is reputational and liveness, not funds (§6) |
 | RD7 | Squads settings | — | threshold ≥ 2 of ≥ threshold + 1; time lock 0; autonomous; same multisig as upgrade authority | Pause must be immediate; one lost device must not lock admin out |
-| RD8 | Authority transfer | one-step · two-step | two-step (`set_authority` + `accept_authority`) | A wrong address (a typo, or the multisig account instead of its vault) can never take effect, because only a key that can sign can accept |
+| RD8 | Authority transfer | one-step · two-step | two-step (`set_authority` + `accept_authority`) | The new authority must sign to accept; this confirms control of the key, not that the proposed address is correct |
 | RD9 | Config initialization | first caller · hard-coded key · upgrade authority | upgrade authority | Closes the front-running window at deploy without baking a key into the binary |
 | RD10 | Token programs admitted | classic + Token-2022 · classic only | classic SPL Token only in v1 | Permanent delegate, transfer hooks, transfer fees and non-transferable mints all break escrowed prizes; checking extensions safely isn't worth it for v1 |
 | RD11 | Labels | none · on both · on creators only | 32-byte label on `CreatorEntry` only | The only on-chain link from a wallet to its vetted organizer; prize names already come from metadata |
