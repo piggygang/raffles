@@ -374,7 +374,7 @@ Mechanical additions the spec didn't spell out. Product semantics are unchanged.
 | --- | --- | --- |
 | Spec §3 actor table, §10 | `whitelist_*` instructions | `allowlist_add` / `allowlist_remove`, R11 applied to code identifiers. `creator_add` / `creator_remove` are unchanged. |
 | Spec §3, §10, E-A5 | `set_authority` (one step) | `set_authority` proposes and the new **`accept_authority`** instruction completes. This adds one instruction to the inventory. |
-| Spec §3 actor table, §10 | `init_config` signed by the DAO admin, with authority moved to Squads afterwards | Still the DAO admin's bootstrap step, with one new requirement: the signer must be the program's upgrade authority (§6) |
+| Spec §3 actor table, §10 | `init_config` signed by the DAO admin, with authority moved to Squads afterwards | The deployer/upgrade-authority key performs the temporary bootstrap: it signs `init_config` and seeds the registries; `Config.authority` then transfers to the Squads vault, followed by the program upgrade-authority transfer (§6) |
 | Spec §10 | "Registry mutations … multisig-signed" | On mainnet. Devnet and localnet use a single keypair authority. |
 | Spec §7 account model | "Creator Registry — PDA per approved wallet", "Prize Allowlist — PDA per collection / mint" | Unchanged, now with seeds and layouts (§3) |
 
