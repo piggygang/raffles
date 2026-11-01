@@ -43,7 +43,7 @@ The two on-chain registries that gate raffle creation in the free model: which a
 
 The three things PIG-88 asks to decide:
 
-- **Storage — one PDA per entry.** A wallet is an approved creator if and only if `CreatorEntry` exists at `[b"creator", wallet]`. An asset is an allowed prize if and only if `PrizeEntry` exists at `[b"prize", kind, address]`. Adding an entry is `init` and removing one is `close`, with rent back to the authority. Only the admin authority can do either. `create_raffle` takes the relevant entries as accounts and checks them (§5).
+- **Storage — one PDA per entry.** Any wallet other than `Config.authority` is an approved creator if and only if `CreatorEntry` exists at `[b"creator", wallet]`. The authority creates without one (RD4). An asset is an allowed prize if and only if `PrizeEntry` exists at `[b"prize", kind, address]`. Adding an entry is `init` and removing one is `close`, with rent back to the authority. Only the admin authority can do either. `create_raffle` takes the relevant entries as accounts and checks them (§5).
 - **Admin authority — a Squads v4 multisig on mainnet, a single keypair on devnet.** This confirms spec §10 / E-A5. `Config.authority` holds the multisig's **vault PDA**. Transfer is two-step (`set_authority` → `accept_authority`), and `init_config` is gated to the program's upgrade authority (§6).
 - **De-listing never touches live raffles.** Entries are read only inside `create_raffle`. No raffle stores a reference to them, and no later instruction reads them. That is the mechanical form of E-C6/E-C7: closing an entry cannot affect anything that already exists.
 
