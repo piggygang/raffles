@@ -6,8 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Git rules
 
-- NEVER commit or push. When work is ready, suggest a commit message and let the user run git themselves.
-- Suggested commit messages must be a single line, with no Co-Authored-By trailer or any other Claude/AI attribution.
+- **Never commit, push, tag, open PRs or deploy.** That means no `git commit`, `git push`, `git tag`, `gh pr create` or `vercel`, not even when asked to "finish up". Creating a branch is fine: use the Linear issue's suggested name (`feature/pig-NNN-<slug>`). When the work is done, run the gate CI runs (`pnpm lint`, the typecheck and `pnpm build`, below) for any code change, then output a suggested commit message plus the exact paths to stage. Never suggest `git add -A` or `git add .`.
+- **Suggested commit messages** are a single line in Conventional Commits form: lowercase imperative subject, optional scope, no trailing period, no body. Types are `feat`, `fix`, `docs`, `refactor`, `style`, `perf`, `chore`, `build` and `ci`. Scopes are app areas: `wallet`, `tx`, `rpc`, `chrome` (header/footer/nav), `brand`, `home`, `raffle`, `create`, `me`, `winners`, `admin`, `legal`, `deps`. `docs` changes scope by document: `spec`, `architecture`, `registries`. Example: `docs(registries): add prize allowlist and creator registry design`. Never append ` (#N)`.
+- **No AI attribution anywhere.** Never write `Co-Authored-By: Claude …`, "🤖 Generated with Claude Code" or anything similar, whether in commit messages, PR text, code comments, page copy or metadata.
 
 ## Commands
 
