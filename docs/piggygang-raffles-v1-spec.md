@@ -33,17 +33,17 @@ On-chain raffles for holders of the three Piggy collections. Free entries, cappe
 | Field | Value |
 | --- | --- |
 | Title | PiggyGang Raffles v1 — feature spec, free holder-rewards model |
-| Status | Draft → `In review` → Signed off — decisions D1–D18 accepted; role sign-offs pending, see §16 |
+| Status | Draft → `In review` → Signed off — decisions D1–D19 accepted; role sign-offs pending, see §16 |
 | Issue | [ALG-578](https://linear.app/algolab-si/issue/ALG-578/feature-spec-piggygang-raffles-v1-free-holder-rewards-model) in project [PiggyGang Raffles](https://linear.app/algolab-si/project/piggygang-raffles-04d282beca26) |
 | Author | Marko Sabec — ALGOLAB |
 | Sources | Project brief; compliance review ALG-582 (done); design issues ALG-579–581, ALG-584–589, ALG-592–601, ALG-607 |
-| Changelog | `1.2 — 2026-08-27` — converted to markdown as the canonical in-repo format (the styled HTML deliverable is retired; Linear keeps the uploaded copies)<br>`1.1-review — 2026-08-27` — D1–D18 accepted as proposed by the project lead; markers flipped to decided<br>`1.0-draft — 2026-08-27` — initial complete draft for review |
+| Changelog | `1.3 — 2026-11-01` — D19 added (PIG-111): holder proof by membership rules, because Piggy SOL Gang and Piggy Girl Gang have no certified collection on-chain; §5, §6, §7, §10, §11 and §15 follow. Mainnet evidence and the rule's layout are in the [holder-proof design](./piggygang-raffles-holder-proof.md).<br>`1.2 — 2026-08-27` — converted to markdown as the canonical in-repo format (the styled HTML deliverable is retired; Linear keeps the uploaded copies)<br>`1.1-review — 2026-08-27` — D1–D18 accepted as proposed by the project lead; markers flipped to decided<br>`1.0-draft — 2026-08-27` — initial complete draft for review |
 
 **What this document is authoritative for:** behaviour — entry rules, lifecycle states and transitions, edge-case outcomes, admin semantics, and the legal invariants. Where an implementation issue disagrees with this spec, the spec wins and the issue gets updated (§16 lists the known updates).
 
 **What it defers:** exact account layouts and byte-level fields (ALG-584), API shapes (ALG-593), infrastructure and data flow (ALG-579 — see [the architecture doc](./piggygang-raffles-architecture.md)), visual design of the app (ALG-596 — aligned with the DressMe look, as is this document).
 
-Decision points are marked **decided** inline and collected in §14 — all eighteen were accepted as proposed on 2026-08-27. Changing one now means a spec revision, not a review note.
+Decision points are marked **decided** inline and collected in §14 — the first eighteen were accepted as proposed on 2026-08-27, and D19 (holder proof) was added on 2026-11-01 after mainnet verification. Changing one now means a spec revision, not a review note.
 
 ## §1 — Overview & goals
 
@@ -118,11 +118,11 @@ The DressMe crossover stays label-level in v1: the prize is a real escrowed vouc
 
 ### Eligibility
 
-A wallet is eligible if it holds at least one NFT with *verified* collection membership in any of the three Piggy collections:
+A wallet is eligible if it holds at least one NFT that satisfies one of the three Piggy membership rules **decided** (§6, D19):
 
-- `Piggy SOL Gang · 10,000 · SPL`
-- `Piggy Girl Gang · 5,000 · SPL`
-- `Piggy Gang · 10,000 · Metaplex Core`
+- `Piggy SOL Gang · 10,000 · SPL` — Token Metadata creator rule, symbol `PSG`
+- `Piggy Girl Gang · 5,000 · SPL` — Token Metadata creator rule, symbol `PGG`
+- `Piggy Gang · 10,000 · Metaplex Core` — Core collection rule
 
 ### Entry math
 
@@ -161,13 +161,16 @@ A wallet is eligible if it holds at least one NFT with *verified* collection mem
 
 Two layers with a clear division of authority: **the chain decides, the service assists.**
 
-- **On-chain — authoritative.** Inside `claim_entries`, per NFT: the token account (or Core asset) is owned by the signer with amount 1, not escrowed elsewhere, and the metadata carries a *verified* collection membership in one of the three collection addresses snapshotted on the raffle. Anything else fails the whole instruction.
+- **On-chain — authoritative.** Inside `claim_entries`, per NFT: the token account (or Core asset) is owned by the signer with amount 1, not escrowed elsewhere, and the NFT satisfies one of the three membership rules snapshotted on the raffle (D19). Anything else fails the whole instruction.
+  - **Token Metadata rule** (SOL Gang, Girl Gang, which have no certified collection on-chain): the metadata account belongs to Token Metadata and to that mint; a `creators` entry equals the rule's creator **with** `verified = true`; `update_authority` and `symbol` (padding stripped) equal the rule's.
+  - **Core rule** (Piggy Gang): the asset belongs to mpl-core and its update authority is `Collection(<the rule's collection>)`.
+  - Only the verified-creator flag and Core collection membership need the team's signatures. The update authority and symbol tell SOL Gang and Girl Gang apart. Layout, checks and mainnet evidence: [holder-proof design](./piggygang-raffles-holder-proof.md).
 - **Off-chain — convenience.** The eligible-entries service (ALG-594) answers `GET /wallets/:address/eligible-entries?raffle=:id`: DAS holdings filtered to the three collections, minus mints whose `EntryReceipt` already exists, up to the remaining allowance — returning the exact account triples for the claim transactions plus Full Gang status.
 
 ### What does not count
 
 - NFTs listed on a marketplace or otherwise escrowed/delegated — the wallet no longer holds them (same rule and same user-facing wording as DressMe's wallet view).
-- Unverified collection metadata and lookalikes — the verified-collection flag is mandatory; DAS spam is filtered by the service and rejected by the program as backstop.
+- Lookalikes — a pig's name, symbol or update authority without the verified creator, or a Core asset outside the collection. The whole rule is mandatory; DAS spam is filtered by the service and rejected by the program as backstop.
 - Holdings in a different wallet (vaults, cold storage) — v1 entries are bound to the signing wallet; delegate claiming is deferred (D12).
 
 The index can lag the chain (webhook ingest); the app labels derived numbers as approximate and always rebuilds claim transactions from chain-consistent data. Races lose cleanly: a receipt that already exists fails that claim with a friendly "this pig was just used" (E-E3, E-I1).
@@ -244,10 +247,10 @@ stateDiagram-v2
 
 ```mermaid
 flowchart LR
-    CFG["Config PDA<br>3 collections · cap · bonus<br>duration bounds · pause<br>admin authority (multisig)"]
+    CFG["Config PDA<br>3 membership rules · cap · bonus<br>duration bounds · pause<br>admin authority (multisig)"]
     REG["Creator Registry<br>PDA per approved wallet"]
     ALW["Prize Allowlist<br>PDA per collection / mint"]
-    RAF["Raffle PDA<br>creator · prize mint · end_ts · state<br>total_entries · winner · vrf state<br>rules_uri · draw-fee lamports<br>snapshot: collections, cap,<br>bonus, bounds — frozen per raffle"]
+    RAF["Raffle PDA<br>creator · prize mint · end_ts · state<br>total_entries · winner · vrf state<br>rules_uri · draw-fee lamports<br>snapshot: membership rules, cap,<br>bonus, bounds — frozen per raffle"]
     ESC["Prize escrow ATA<br>PDA authority · holds the prize"]
     ER["EntryReceipt PDA<br>seeds: raffle, nft_mint<br>one per entered NFT<br>rent payer recorded"]
     EP["EntryPosition PDA<br>seeds: raffle, wallet — one per wallet<br>entries_claimed · entry ranges<br>collections_seen bitmask<br>bonus_awarded flag<br>rent payer recorded"]
@@ -262,7 +265,7 @@ flowchart LR
     EP -.- RENT
 ```
 
-*One `EntryPosition` per wallet per raffle (seeds `[raffle, wallet]`) carries the cap counter, the collections-seen bitmask and the bonus flag — this is what makes "bonus once per wallet" safe across batched claims (resolves R4). Byte-level layout belongs to ALG-584.*
+*One `EntryPosition` per wallet per raffle (seeds `[raffle, wallet]`) carries the cap counter, the collections-seen bitmask (bit *i* = membership rule *i*) and the bonus flag — this is what makes "bonus once per wallet" safe across batched claims (resolves R4). Byte-level layout belongs to ALG-584.*
 
 ## §8 — Draw fairness & VRF
 
@@ -313,7 +316,7 @@ Two registries, canonically named to stop the "whitelist" ambiguity in earlier i
 
 ### Snapshot at create
 
-The Raffle PDA snapshots `collections`, `entry_cap`, `full_gang_bonus` and the duration bounds it validated against. Config edits apply to *future* raffles only — published rules are a legal artifact, and mid-raffle rule mutation must be impossible (D14, R6). Live-read state: the pause flag and the registries (which only gate creation anyway).
+The Raffle PDA snapshots `membership_rules` (D19), `entry_cap`, `full_gang_bonus` and the duration bounds it validated against. Config edits apply to *future* raffles only — published rules are a legal artifact, and mid-raffle rule mutation must be impossible (D14, R6). Live-read state: the pause flag and the registries (which only gate creation anyway).
 
 ### Pause matrix
 
@@ -359,7 +362,7 @@ The normative behaviour matrix — the rows engineers write tests against (ALG-5
 | E-E2 | **Partially-used pigs** — wallet holds NFTs already entered by a previous owner | Those mints are ineligible for this raffle (receipt exists); the service filters them, the program rejects them. The cap counts entries claimed by this wallet, not NFTs owned — 10 pigs with 3 used still claim 7 entries, and more with fresh pigs up to cap. | service · program |
 | E-E3 | Same NFT in two racing claim transactions | First receipt init wins; the second transaction fails on the collision. The app shows "this pig was just used" and rebuilds. | program · app |
 | E-E4 | NFT listed on a marketplace / escrowed / frozen-delegated | Ownership check fails (owner ≠ signer or amount ≠ 1) — filtered by the service, rejected on-chain as backstop. | program |
-| E-E5 | Lookalike NFT or unverified collection flag | Rejected on-chain — verified-collection membership is mandatory on both SPL and Core paths. | program |
+| E-E5 | Lookalike NFT — a pig's name or symbol, an unverified creator, the wrong update authority, or a Core asset outside the collection | Rejected on-chain — the whole membership rule must hold (D19): verified creator plus update authority and symbol on the SPL path, collection membership on the Core path. | program |
 | E-E6 | Claim transaction lands after `end_ts` | Reject — claiming requires `now < end_ts`. The UI stops offering entry ~30 s before the deadline. | program · app |
 | E-E7 | Full Gang completed across batches or days | The bonus evaluates per claim against the collections-seen bitmask and the bonus-awarded flag on the wallet's `EntryPosition`; awarded automatically by the claim that completes the set — once, regardless of transaction count. | program |
 | E-E8 | Wallet sells its pigs after entering | Entries are snapshot-at-claim: they stand, attributed to the claiming wallet. The winner is the claiming wallet even if it holds nothing at draw time. | — by design |
@@ -406,18 +409,18 @@ The normative behaviour matrix — the rows engineers write tests against (ALG-5
 | ID | Scenario | Specified behaviour | Acts |
 | --- | --- | --- | --- |
 | E-A1 | Admin cancels mid-raffle with claimed entries | Allowed pre-request. State → Cancelled with a recorded reason: entries void, prize reclaimable by the creator, entry accounts closeable immediately — entrants lose nothing but sunk gas (noted in §2). The app labels the raffle Cancelled with the reason. | admin · cron sweeps |
-| E-A2 | Config changed mid-raffle (cap, bonus, collections, bounds) | No effect on live raffles — values were snapshotted at create (D14). Applies to future raffles. | — by design |
+| E-A2 | Config changed mid-raffle (cap, bonus, membership rules, bounds) | No effect on live raffles — values were snapshotted at create (D14). Applies to future raffles. | — by design |
 | E-A3 | Pause mid-raffle | Per the pause matrix (§10): progression freezes, funds-out stays open, `end_ts` keeps running. | admin |
 | E-A4 | Per-raffle cap override | `create_raffle` takes an optional cap override bounded `1..=snapshot cap` (D6) — GM raffles use cap 1. Snapshotted like everything else. | creator at create |
 | E-A5 | Admin key compromise / rotation | Authority is a Squads multisig from deploy; rotation via `set_authority`; ops runbook in ALG-603. | admin |
-| E-A6 | A collection address must change (e.g. Core collection migrates) | Live raffles keep their snapshot; a config update fixes future raffles. No instruction mutates a live raffle's collections. | admin |
+| E-A6 | A membership rule must change (e.g. the Core collection migrates, or the legacy collections get certified on-chain — D19 option B) | Live raffles keep their snapshot; a config update fixes future raffles. No instruction mutates a live raffle's membership rules. | admin |
 
 ### F — Infrastructure & app
 
 | ID | Scenario | Specified behaviour | Acts |
 | --- | --- | --- | --- |
 | E-I1 | Webhook/index lag — stale counts and odds | The chain is the source of truth; the app labels odds approximate until confirmed and rebuilds claim transactions from fresh data; lost races fail with friendly errors. | app |
-| E-I2 | DAS returns spam or lookalikes | The service filters strictly by the three verified collection addresses; the on-chain check is the backstop. | service · program |
+| E-I2 | DAS returns spam or lookalikes | The service filters strictly to the three Piggy collections as the indexer knows them (closed mint lists for SOL Gang and Girl Gang, the Core collection for Piggy Gang); the on-chain membership rule is the backstop. | service · program |
 | E-I3 | Two-transaction claim, second fails | Partial state is valid — claims are incremental by design. The app resumes with "claim remaining N". | app |
 | E-I4 | Clock drift vs the countdown | The program gates on cluster time; the countdown is advisory and entry closes in the UI ~30 s early. | app |
 | E-I5 | GM cron misses a day | The missed raffle is simply skipped — no retroactive raffles. Cron alerting plus manual admin creation as fallback. | ops |
@@ -478,7 +481,7 @@ Pointer for reviewers: the v2 direction (Merkle snapshot entry mode) is designed
 
 ## §14 — Decisions
 
-**All eighteen rows were accepted as proposed on 2026-08-27** by the project lead. They are now the decided defaults of v1; the options column stays for the record. Reopening a row is a spec revision (§0 changelog), not a review note.
+**D1–D18 were accepted as proposed on 2026-08-27** by the project lead. D19 was added on 2026-11-01 (PIG-111), after mainnet showed that two Piggy collections have no certified collection. They are now the decided defaults of v1; the options column stays for the record. Reopening a row is a spec revision (§0 changelog), not a review note.
 
 | ID | Decision | Options considered | Decided | Rationale |
 | --- | --- | --- | --- | --- |
@@ -500,6 +503,7 @@ Pointer for reviewers: the v2 direction (Merkle snapshot entry mode) is designed
 | D16 | Rules publication | app page only · required rules_uri + page | required `rules_uri` + rendered page | Makes the nagradna-igra requirement structurally unskippable. |
 | D17 | Winner identity for prize tax | nothing · off-chain process | off-chain DAO process, nothing on-chain | Tax duty sits with the DAO; on-chain PII is a non-starter. |
 | D18 | Whale entry selection | arbitrary · deterministic | first N by mint order | Reproducible claim transactions simplify support and retries. |
+| D19 | Holder proof | A — membership rules (verified creator + update authority + symbol; Core collection) · B — certify collections on-chain · C — Merkle allowlist of mints | A — `Config` holds 3 membership rules, snapshotted per raffle | SOL Gang and Girl Gang have `collection: None` on every NFT. On mainnet the creator rule matches exactly the 13,134 live listed mints and nothing else. B is a 13k-transaction migration and stays open as a later rule kind. C's 14-level proofs break the ~6-NFTs-per-transaction budget. |
 
 ## §15 — Glossary
 
@@ -507,6 +511,7 @@ Pointer for reviewers: the v2 direction (Merkle snapshot entry mode) is designed
 | --- | --- |
 | `nagradna igra` | Slovene: a free promotional prize game — the legal category this platform lives in, explicitly excluded from the Games of Chance Act. |
 | `Full Gang` | Holding (and here: entering) at least one Piggy from each of the three collections. Earns the once-per-raffle bonus. |
+| `Membership rule` | How the program recognises a Piggy collection (D19). For the Token Metadata collections it is a verified creator plus update authority and symbol; for Core it is collection membership. `Config` holds three; each raffle snapshots them. |
 | `EntryReceipt` | PDA at seeds [raffle, nft_mint] marking an NFT as used in a raffle. One NFT, one use per raffle. |
 | `EntryPosition` | PDA at seeds [raffle, wallet] holding a wallet's entry ranges, cap counter, collections-seen bitmask and bonus flag. |
 | `Prize Allowlist` | Registry of collections and mints allowed as prizes. Checked at create only. |
@@ -533,6 +538,7 @@ Four sign-offs, each owning a slice of this document. Sign-off means: all §14 r
 ### Checklist
 
 - [x] Every D1–D18 row in §14 accepted or amended — **done**, accepted as proposed on 2026-08-27; no amendments.
+- [x] D19 (holder proof) added on 2026-11-01 — PIG-111, verified against mainnet.
 - [ ] Every §11 row has an accepted behaviour — these become the test scenarios of ALG-590 and ALG-602.
 - [ ] Issue updates filed where this spec changed the plan (list below).
 - [ ] Spec status flipped to Signed off; program work (milestone 2) unblocked.
@@ -547,3 +553,4 @@ Four sign-offs, each owning a slice of this document. Sign-off means: all §14 r
 | R11 | Rename "whitelist" → Prize Allowlist and Creator Registry across issues and admin UI copy. | ALG-581 · ALG-589 · ALG-600 |
 | D6 | Optional bounded per-raffle cap override in `create_raffle`; GM raffles use cap 1. | ALG-585 · ALG-598 |
 | R2 | Close gate includes the expiry + grace backstop so rent can never strand. | ALG-588 · ALG-595 |
+| D19 | Replace the three `Config` collection addresses with three `MembershipRule`s (75 bytes each), snapshotted on the Raffle. `init_config`/`update_config` take and validate them. `claim_entries` checks one rule per NFT by `rule_index`, using the creator rule on the SPL path. Layout: [holder-proof design](./piggygang-raffles-holder-proof.md) §5. | PIG-86 · PIG-81 · PIG-84 |
