@@ -33,17 +33,17 @@ On-chain raffles for holders of the three Piggy collections. Free entries, cappe
 | Field | Value |
 | --- | --- |
 | Title | PiggyGang Raffles v1 — feature spec, free holder-rewards model |
-| Status | Draft → `In review` → Signed off — decisions D1–D19 accepted; role sign-offs pending, see §16 |
+| Status | Draft → `In review` → Signed off — decisions D1–D20 accepted; role sign-offs pending, see §16 |
 | Issue | [ALG-578](https://linear.app/algolab-si/issue/ALG-578/feature-spec-piggygang-raffles-v1-free-holder-rewards-model) in project [PiggyGang Raffles](https://linear.app/algolab-si/project/piggygang-raffles-04d282beca26) |
 | Author | Marko Sabec — ALGOLAB |
 | Sources | Project brief; compliance review ALG-582 (done); design issues ALG-579–581, ALG-584–589, ALG-592–601, ALG-607 |
-| Changelog | `1.3 — 2026-11-01` — D19 added (PIG-111): holder proof by membership rules, because Piggy SOL Gang and Piggy Girl Gang have no certified collection on-chain; §5, §6, §7, §10, §11 and §15 follow. Mainnet evidence and the rule's layout are in the [holder-proof design](./piggygang-raffles-holder-proof.md).<br>`1.2 — 2026-08-27` — converted to markdown as the canonical in-repo format (the styled HTML deliverable is retired; Linear keeps the uploaded copies)<br>`1.1-review — 2026-08-27` — D1–D18 accepted as proposed by the project lead; markers flipped to decided<br>`1.0-draft — 2026-08-27` — initial complete draft for review |
+| Changelog | `1.4 — 2026-11-02` — D20 added (PIG-110): rules hosted permanently on Arweave via ArDrive Turbo, with a `rules_hash` (sha256) on the Raffle so the app renders only the exact committed document; per-raffle rules for GM raffles too. §2, §7, §11, §12, §15 and §16 follow. Format, flows and the template are in the [rules design](./piggygang-raffles-rules.md).<br>`1.3 — 2026-11-01` — D19 added (PIG-111): holder proof by membership rules, because Piggy SOL Gang and Piggy Girl Gang have no certified collection on-chain; §5, §6, §7, §10, §11 and §15 follow. Mainnet evidence and the rule's layout are in the [holder-proof design](./piggygang-raffles-holder-proof.md).<br>`1.2 — 2026-08-27` — converted to markdown as the canonical in-repo format (the styled HTML deliverable is retired; Linear keeps the uploaded copies)<br>`1.1-review — 2026-08-27` — D1–D18 accepted as proposed by the project lead; markers flipped to decided<br>`1.0-draft — 2026-08-27` — initial complete draft for review |
 
 **What this document is authoritative for:** behaviour — entry rules, lifecycle states and transitions, edge-case outcomes, admin semantics, and the legal invariants. Where an implementation issue disagrees with this spec, the spec wins and the issue gets updated (§16 lists the known updates).
 
 **What it defers:** exact account layouts and byte-level fields (ALG-584), API shapes (ALG-593), infrastructure and data flow (ALG-579 — see [the architecture doc](./piggygang-raffles-architecture.md)), visual design of the app (ALG-596 — aligned with the DressMe look, as is this document).
 
-Decision points are marked **decided** inline and collected in §14 — the first eighteen were accepted as proposed on 2026-08-27, and D19 (holder proof) was added on 2026-11-01 after mainnet verification. Changing one now means a spec revision, not a review note.
+Decision points are marked **decided** inline and collected in §14 — the first eighteen were accepted as proposed on 2026-08-27, D19 (holder proof) was added on 2026-11-01 after mainnet verification, and D20 (rules hosting) on 2026-11-02. Changing one now means a spec revision, not a review note.
 
 ## §1 — Overview & goals
 
@@ -74,7 +74,7 @@ A raffle with paid tickets is legally a lottery — consideration + chance + pri
 ### The three invariants
 
 - **Invariant 1 — no consideration, ever.** No entry may cost anything beyond network gas. Account rent an entrant fronts is temporary only if it reliably comes back — so rent refunds (§9) are a legal mechanism, not a nicety, and no code path may strand them.
-- **Invariant 2 — published rules per raffle.** Every raffle carries published rules (organizer, duration, prize, how winners are drawn). Enforced structurally: `create_raffle` requires a `rules_uri` and the app renders a rules page per raffle (§12).
+- **Invariant 2 — published rules per raffle.** Every raffle carries published rules (organizer, duration, prize, how winners are drawn). Enforced structurally: `create_raffle` requires a `rules_uri` and the document's `rules_hash` (D20), and the app renders a rules page per raffle only from a document that matches the hash (§12).
 - **Invariant 3 — 18+ and prize taxes.** The app shows an 18+ note; prize-tax duties sit with the DAO and are handled off-chain (§14, D17). No personal data goes on-chain.
 
 > **Guard-rail:** any future feature that touches these invariants — "premium entries", sponsored boosts, anything where value flows from an entrant — requires a new legal review before a line of code is written.
@@ -213,7 +213,7 @@ stateDiagram-v2
 
 | From → To | Instruction | Caller | Guard |
 | --- | --- | --- | --- |
-| — → Active | `create_raffle` | admin / registry creator | Prize on allowlist · escrow funded atomically · duration within bounds · `rules_uri` present · draw fee funded (R14) · not paused |
+| — → Active | `create_raffle` | admin / registry creator | Prize on allowlist · escrow funded atomically · duration within bounds · `rules_uri` and `rules_hash` present · draw fee funded (R14) · not paused |
 | Active → Active | `claim_entries` | holder | now < end_ts · signer ≠ creator · per-NFT proofs pass · cap respected · not paused |
 | Active → Drawing | `request_draw` | anyone | now ≥ end_ts · total_entries ≥ 1 · not paused |
 | Drawing → Drawing | `request_draw` (re-request) | anyone | retry timeout elapsed since last request (E-D4) |
@@ -250,7 +250,7 @@ flowchart LR
     CFG["Config PDA<br>3 membership rules · cap · bonus<br>duration bounds · pause<br>admin authority (multisig)"]
     REG["Creator Registry<br>PDA per approved wallet"]
     ALW["Prize Allowlist<br>PDA per collection / mint"]
-    RAF["Raffle PDA<br>creator · prize mint · end_ts · state<br>total_entries · winner · vrf state<br>rules_uri · draw-fee lamports<br>snapshot: membership rules, cap,<br>bonus, bounds — frozen per raffle"]
+    RAF["Raffle PDA<br>creator · prize mint · end_ts · state<br>total_entries · winner · vrf state<br>rules_uri · rules_hash · draw-fee lamports<br>snapshot: membership rules, cap,<br>bonus, bounds — frozen per raffle"]
     ESC["Prize escrow ATA<br>PDA authority · holds the prize"]
     ER["EntryReceipt PDA<br>seeds: raffle, nft_mint<br>one per entered NFT<br>rent payer recorded"]
     EP["EntryPosition PDA<br>seeds: raffle, wallet — one per wallet<br>entries_claimed · entry ranges<br>collections_seen bitmask<br>bonus_awarded flag<br>rent payer recorded"]
@@ -351,7 +351,7 @@ The normative behaviour matrix — the rows engineers write tests against (ALG-5
 | E-C5 | Config paused | Creation blocked per the pause matrix. | program |
 | E-C6 | Creator removed from the registry mid-raffle | Live raffle continues; removal gates new creations only. Reclaim rights follow `raffle.creator`. | program |
 | E-C7 | Prize delisted from the allowlist mid-raffle | No effect on the live raffle; blocks new creations with that prize. | program |
-| E-C8 | Missing or empty `rules_uri` | Reject at create — published rules are a legal requirement (Invariant 2). | program |
+| E-C8 | Missing or empty `rules_uri`, or an all-zero `rules_hash` | Reject at create — published rules are a legal requirement (Invariant 2), and the hash is what makes them tamper-evident (D20). | program |
 | E-C9 | Draw-fee lamports not funded at create | Reject — a raffle that cannot pay for its own draw must not exist (R14). | program |
 
 ### B — Entry & claiming
@@ -424,6 +424,7 @@ The normative behaviour matrix — the rows engineers write tests against (ALG-5
 | E-I3 | Two-transaction claim, second fails | Partial state is valid — claims are incremental by design. The app resumes with "claim remaining N". | app |
 | E-I4 | Clock drift vs the countdown | The program gates on cluster time; the countdown is advisory and entry closes in the UI ~30 s early. | app |
 | E-I5 | GM cron misses a day | The missed raffle is simply skipped — no retroactive raffles. Cron alerting plus manual admin creation as fallback. | ops |
+| E-I6 | Rules document unreachable, or the fetched bytes don't match `rules_hash` | The app never renders unverified text as the rules: it tries the next gateway, and otherwise shows the hash, the URI and a warning. The raffle itself is unaffected — the commitment is on-chain, and any copy of the bytes that matches the hash is authentic (D20). | app |
 
 ## §12 — UX surface
 
@@ -433,7 +434,7 @@ Behavioural summary only — visual design follows the DressMe look (ALG-596), a
 | --- | --- |
 | `/` | Raffle cards — prize image/name/collection, "Free entry" badge, entries claimed, countdown, your-entries indicator. Tabs Active / Ending soon / Past; filter by prize collection; search. Live-ish updates via polling. |
 | `/raffle/[id]` | Full prize info with explorer link, rules link, entrant count, odds. The one-click free entry flow: eligible pigs → batched claim transactions → progress per batch. State-aware CTA (table below). |
-| `/create` | Gated to admin + registry. Pick prize (wallet grid filtered to the Prize Allowlist, ineligible NFTs greyed with a "request allowlisting" hint) → set terms (duration within bounds, optional cap override, title/description for the rules page) → review & sign one transaction (escrow + init) → share link + auto-generated rules page. |
+| `/create` | Gated to admin + registry. Pick prize (wallet grid filtered to the Prize Allowlist, ineligible NFTs greyed with a "request allowlisting" hint) → set terms (duration within bounds, optional cap override, title/description for the rules page) → review the generated rules document → sign its Arweave upload → sign one transaction (escrow + init, carrying `rules_uri` + `rules_hash`) → share link + rules page (D20). |
 | `/me` | My entries with odds ("7 / 3,400 entries — 0.2%") and Full Gang indicator; won raffles highlighted with Claim prize; reclaim rent on settled raffles (one-click close); My raffles for creators with per-state chips and reclaim actions. |
 | `/admin` | Prize Allowlist / Prize mints / Creator Registry tabs (add: paste address → validate → preview → sign; remove); config panel (cap, bonus, bounds, pause — each change a signed transaction); change log from indexed events. |
 | `/winners` | Past raffles: prize, winner wallet, total entries, VRF proof link. Running totals — prizes given away, unique winners. The transparency page the fairness claim points to. |
@@ -451,7 +452,7 @@ Behavioural summary only — visual design follows the DressMe look (ALG-596), a
 
 ### Required legal elements
 
-- Rules link on every raffle page (rendered from `rules_uri`): organizer, duration, prize, draw method, 18+ note.
+- Rules link on every raffle page, rendered from `rules_uri` only once the document matches `rules_hash`: organizer, duration, prize, draw method, 18+ note — full field list in the [rules design](./piggygang-raffles-rules.md) (D20).
 - The free explainer near every entry action: "Free — you only pay network gas, and the account rent comes back after the raffle settles."
 - ToS and responsible-use pages in the footer (ALG-582, ALG-605).
 
@@ -481,7 +482,7 @@ Pointer for reviewers: the v2 direction (Merkle snapshot entry mode) is designed
 
 ## §14 — Decisions
 
-**D1–D18 were accepted as proposed on 2026-08-27** by the project lead. D19 was added on 2026-11-01 (PIG-111), after mainnet showed that two Piggy collections have no certified collection. They are now the decided defaults of v1; the options column stays for the record. Reopening a row is a spec revision (§0 changelog), not a review note.
+**D1–D18 were accepted as proposed on 2026-08-27** by the project lead. D19 was added on 2026-11-01 (PIG-111), after mainnet showed that two Piggy collections have no certified collection, and D20 on 2026-11-02 (PIG-110). They are now the decided defaults of v1; the options column stays for the record. Reopening a row is a spec revision (§0 changelog), not a review note.
 
 | ID | Decision | Options considered | Decided | Rationale |
 | --- | --- | --- | --- | --- |
@@ -504,6 +505,7 @@ Pointer for reviewers: the v2 direction (Merkle snapshot entry mode) is designed
 | D17 | Winner identity for prize tax | nothing · off-chain process | off-chain DAO process, nothing on-chain | Tax duty sits with the DAO; on-chain PII is a non-starter. |
 | D18 | Whale entry selection | arbitrary · deterministic | first N by mint order | Reproducible claim transactions simplify support and retries. |
 | D19 | Holder proof | A — membership rules (verified creator + update authority + symbol; Core collection) · B — certify collections on-chain · C — Merkle allowlist of mints | A — `Config` holds 3 membership rules, snapshotted per raffle | SOL Gang and Girl Gang have `collection: None` on every NFT. On mainnet the creator rule matches exactly the 13,134 live listed mints and nothing else. B is a 13k-transaction migration and stays open as a later rule kind. C's 14-level proofs break the ~6-NFTs-per-transaction budget. |
+| D20 | Rules hosting & integrity | Arweave via Irys · Arweave via ArDrive Turbo · IPFS + pinning · plain HTTPS; with or without an on-chain hash; GM per raffle or one standing document | Arweave via Turbo + `rules_hash` (sha256) on the Raffle; Markdown + YAML front-matter; one document per raffle, GM included | Irys stopped uploading to Arweave on 2026-11-01. Turbo writes permanent Arweave data, signs with a browser Solana wallet and takes SOL. The on-chain hash makes the rules tamper-evident whatever the host or gateway; IPFS needs pinning paid forever, and HTTPS is mutable. A standing GM document would leave prize and dates to chain lookups. |
 
 ## §15 — Glossary
 
@@ -518,6 +520,7 @@ Pointer for reviewers: the v2 direction (Merkle snapshot entry mode) is designed
 | `Creator Registry` | Registry of wallets allowed to create raffles — DAO admin plus approved partners. |
 | `VRF` | Verifiable random function — randomness with a public proof anyone can check. |
 | `crank` | A permissionless call that moves a raffle forward (draw, finalize, close). Cron-automated, but anyone can do it. |
+| `rules_hash` | sha256 of the exact rules document bytes, stored on the Raffle (D20). The app renders a raffle's rules only when the fetched document matches it. |
 | `snapshot-at-create` | Config values copied onto the Raffle PDA at creation, frozen for its lifetime. |
 | `Core migration` | Burning a Piggy SOL Gang SPL NFT to mint the same token id as a Piggy Gang Metaplex Core asset. |
 | `DAS` | Digital Asset Standard API (Helius) — how the service reads wallet holdings off-chain. |
@@ -539,6 +542,7 @@ Four sign-offs, each owning a slice of this document. Sign-off means: all §14 r
 
 - [x] Every D1–D18 row in §14 accepted or amended — **done**, accepted as proposed on 2026-08-27; no amendments.
 - [x] D19 (holder proof) added on 2026-11-01 — PIG-111, verified against mainnet.
+- [x] D20 (rules hosting) added on 2026-11-02 — PIG-110; the rules template text still needs the legal reviewer's sign-off.
 - [ ] Every §11 row has an accepted behaviour — these become the test scenarios of ALG-590 and ALG-602.
 - [ ] Issue updates filed where this spec changed the plan (list below).
 - [ ] Spec status flipped to Signed off; program work (milestone 2) unblocked.
@@ -554,3 +558,4 @@ Four sign-offs, each owning a slice of this document. Sign-off means: all §14 r
 | D6 | Optional bounded per-raffle cap override in `create_raffle`; GM raffles use cap 1. | ALG-585 · ALG-598 |
 | R2 | Close gate includes the expiry + grace backstop so rent can never strand. | ALG-588 · ALG-595 |
 | D19 | Replace the three `Config` collection addresses with three `MembershipRule`s (75 bytes each), snapshotted on the Raffle. `init_config`/`update_config` take and validate them. `claim_entries` checks one rule per NFT by `rule_index`, using the creator rule on the SPL path. Layout: [holder-proof design](./piggygang-raffles-holder-proof.md) §5. | PIG-86 · PIG-81 · PIG-84 |
+| D20 | `create_raffle` takes `rules_uri` (≤ 96 bytes) and `rules_hash` (`[u8; 32]`), stores both on the Raffle and emits them in `RaffleCreated`; Raffle seeds derivable before creation. The rules page verifies the hash; `/create` and the GM crank generate and upload per-raffle documents. Details: [rules design](./piggygang-raffles-rules.md) §7. | PIG-86 · PIG-141 · PIG-127 · PIG-165 · PIG-124 · PIG-161 |
