@@ -37,7 +37,7 @@ On-chain raffles for holders of the three Piggy collections. Free entries, cappe
 | Issue | [ALG-578](https://linear.app/algolab-si/issue/ALG-578/feature-spec-piggygang-raffles-v1-free-holder-rewards-model) in project [PiggyGang Raffles](https://linear.app/algolab-si/project/piggygang-raffles-04d282beca26) |
 | Author | Marko Sabec — ALGOLAB |
 | Sources | Project brief; compliance review ALG-582 (done); design issues ALG-579–581, ALG-584–589, ALG-592–601, ALG-607 |
-| Changelog | `1.5 — 2026-11-04` — D21 and D22 added (PIG-132): `reclaim_prize` is permissionless with the destination fixed to `raffle.creator`, and Metaplex Core assets can be prizes, escrowed by transfer to the Raffle PDA. §3, §7, §9, §10, §11, §15 and §16 follow. Mechanics and mainnet evidence are in the [prize escrow design](./piggygang-raffles-prize-escrow.md).<br>`1.4 — 2026-11-02` — D20 added (PIG-110): rules hosted permanently on Arweave via ArDrive Turbo, with a `rules_hash` (sha256) on the Raffle so the app renders only the exact committed document; per-raffle rules for GM raffles too. §2, §7, §11, §12, §15 and §16 follow. Format, flows and the template are in the [rules design](./piggygang-raffles-rules.md).<br>`1.3 — 2026-11-01` — D19 added (PIG-111): holder proof by membership rules, because Piggy SOL Gang and Piggy Girl Gang have no certified collection on-chain; §5, §6, §7, §10, §11 and §15 follow. Mainnet evidence and the rule's layout are in the [holder-proof design](./piggygang-raffles-holder-proof.md).<br>`1.2 — 2026-08-27` — converted to markdown as the canonical in-repo format (the styled HTML deliverable is retired; Linear keeps the uploaded copies)<br>`1.1-review — 2026-08-27` — D1–D18 accepted as proposed by the project lead; markers flipped to decided<br>`1.0-draft — 2026-08-27` — initial complete draft for review |
+| Changelog | `1.5 — 2026-11-04` — D21 and D22 added (PIG-132): `reclaim_prize` is permissionless with the destination fixed to `raffle.creator`, and Metaplex Core assets can be prizes, escrowed by transfer to the Raffle PDA. The R2 backstop becomes an explicit path: `close_entry_accounts` opens on a Drawn raffle at claim expiry + 30 d grace, and `close_raffle` waits for the prize and every entry account. §3, §7, §9, §10, §11, §12, §15 and §16 follow. Mechanics and mainnet evidence are in the [prize escrow design](./piggygang-raffles-prize-escrow.md).<br>`1.4 — 2026-11-02` — D20 added (PIG-110): rules hosted permanently on Arweave via ArDrive Turbo, with a `rules_hash` (sha256) on the Raffle so the app renders only the exact committed document; per-raffle rules for GM raffles too. §2, §7, §11, §12, §15 and §16 follow. Format, flows and the template are in the [rules design](./piggygang-raffles-rules.md).<br>`1.3 — 2026-11-01` — D19 added (PIG-111): holder proof by membership rules, because Piggy SOL Gang and Piggy Girl Gang have no certified collection on-chain; §5, §6, §7, §10, §11 and §15 follow. Mainnet evidence and the rule's layout are in the [holder-proof design](./piggygang-raffles-holder-proof.md).<br>`1.2 — 2026-08-27` — converted to markdown as the canonical in-repo format (the styled HTML deliverable is retired; Linear keeps the uploaded copies)<br>`1.1-review — 2026-08-27` — D1–D18 accepted as proposed by the project lead; markers flipped to decided<br>`1.0-draft — 2026-08-27` — initial complete draft for review |
 
 **What this document is authoritative for:** behaviour — entry rules, lifecycle states and transitions, edge-case outcomes, admin semantics, and the legal invariants. Where an implementation issue disagrees with this spec, the spec wins and the issue gets updated (§16 lists the known updates).
 
@@ -185,7 +185,7 @@ The happy path, end to end:
 
 `Active` · `Ended — clock-derived` · `Drawing` · `Drawn` · `Settled` (terminal) · `Cancelled` (terminal)
 
-**"Ended" is not an instruction transition** — no `end_raffle` exists. A raffle is ended when `now ≥ end_ts` while Active; the program gates on the clock and the indexer derives the phase from `end_ts` (resolves R8). Terminal states are Settled and Cancelled; both unlock account closing.
+**"Ended" is not an instruction transition** — no `end_raffle` exists. A raffle is ended when `now ≥ end_ts` while Active; the program gates on the clock and the indexer derives the phase from `end_ts` (resolves R8). Terminal states are Settled and Cancelled; both unlock account closing. A Drawn raffle past the backstop also lets its entry accounts close, without becoming terminal (E-S8).
 
 ```mermaid
 stateDiagram-v2
@@ -196,6 +196,7 @@ stateDiagram-v2
     Drawing --> Drawn: fulfill + finalize — winner stored on raffle
     Drawn --> Settled: claim_prize — winner, within 30 d
     Drawn --> Settled: reclaim_prize — anyone, to creator, after 30 d unclaimed
+    Drawn --> Drawn: close_entry_accounts — anyone, after claim expiry + 30 d grace
     Active --> Settled: reclaim_prize — anyone, to creator, ended and entries = 0
     Active --> Cancelled: cancel_raffle — admin, pre-draw
     Drawing --> Cancelled: break-glass cancel — admin, stuck >= 7 d
@@ -207,7 +208,7 @@ stateDiagram-v2
     end note
 ```
 
-*Every path terminates in Settled or Cancelled, and both unlock account closing — no raffle can strand entrant rent. Solid edges are the happy path; the retry loop, break-glass cancel and expiry reclaims are the fallbacks.*
+*Every path terminates in Settled or Cancelled, and both unlock account closing. The one case that could hold entrant rent is a Drawn raffle whose prize can't move: its entry accounts close at the E-S8 backstop instead, so no raffle strands rent. Solid edges are the happy path; the retry loop, break-glass cancel and expiry reclaims are the fallbacks.*
 
 ### Transition table
 
@@ -220,11 +221,12 @@ stateDiagram-v2
 | Drawing → Drawn | `fulfill_draw` + finalize | VRF · anyone | randomness delivered · supplied EntryPosition range contains winner_index · winner pubkey stored (R18) |
 | Drawn → Settled | `claim_prize` | winner | signer = stored winner · within 30 d claim window **decided** |
 | Drawn → Settled | `reclaim_prize` | anyone | claim window expired (E-S1) · prize to `raffle.creator` only (D21) |
+| Drawn → Drawn | `close_entry_accounts` (backstop) | anyone | now ≥ claim expiry + 30 d grace **decided** (E-S8) · rent → recorded payer · the prize stays in escrow |
 | Active → Settled | `reclaim_prize` | anyone | now ≥ end_ts · total_entries = 0 (E-D1) · prize to `raffle.creator` only (D21) |
 | Active → Cancelled | `cancel_raffle` | admin | before request_draw · reason recorded (E-A1) |
 | Drawing → Cancelled | `cancel_raffle` (break-glass) | admin | ≥ 7 d stuck in Drawing **decided** (E-D5) |
 | Cancelled → — | `reclaim_prize` | anyone | prize returns to creator; state stays Cancelled |
-| terminal → — | `close_entry_accounts` · `close_raffle` | anyone · creator/anyone | state ∈ {Settled, Cancelled} · rent → recorded payer (§9) · `close_raffle` also needs the prize out of escrow (D22) |
+| terminal → — | `close_entry_accounts` · `close_raffle` | anyone · creator/anyone | state ∈ {Settled, Cancelled} · rent → recorded payer (§9) · `close_raffle` also needs the prize out of escrow (D22) and every entry account closed (E-S9) |
 
 `request_draw` and zero-entry `reclaim_prize` are mutually exclusive by entry count — ≥ 1 entry draws, 0 entries reclaims; there is no state where both or neither apply (R17). Time is cluster time: the program gates on the on-chain clock, UI countdowns are advisory and stop offering entry ~30 s before `end_ts` (E-I4).
 
@@ -239,7 +241,7 @@ stateDiagram-v2
 | drawn | instant marker | Winner stored on the raffle; claim window opens |
 | claim window | 30 d from Drawn | Winner may `claim_prize` |
 | claim expiry → reclaim to creator | after 30 d unclaimed | Anyone may `reclaim_prize`; the prize returns to the creator |
-| close + rent sweep | open from settlement onward | `close_entry_accounts` + `close_raffle`; rent to recorded payers |
+| close + rent sweep | open from settlement onward; entry accounts at claim expiry + 30 d grace if still Drawn (E-S8) | `close_entry_accounts` + `close_raffle`; rent to recorded payers |
 
 *Every timer on one line: duration bounds 1 h–30 d, VRF retry ticks inside the draw window, the 30-day claim window, then creator reclaim. Values decided — see D4, D5.*
 
@@ -283,10 +285,10 @@ No proceeds, no fees — settlement here means prizes out and rent back. The ren
 ### Rent flow
 
 - Entrants front the rent for their `EntryReceipt` and `EntryPosition` accounts at claim time; each account records its payer.
-- `close_entry_accounts` is permissionless but gated to `state ∈ {Settled, Cancelled}`. Lamports always return to the **recorded payer, never the cranker** — early or redirected closes fail; correct cranking is a public good the cron performs (resolves R3, E-S6).
-- The cron sweeps closeable accounts after settlement so entrants get rent back without lifting a finger; `/me` also offers a manual reclaim (E-S7).
+- `close_entry_accounts` is permissionless but gated to `state ∈ {Settled, Cancelled}`, or to a Drawn raffle past the backstop (E-S8). Lamports always return to the **recorded payer, never the cranker** — early or redirected closes fail; correct cranking is a public good the cron performs (resolves R3, E-S6).
+- The cron sweeps closeable accounts so entrants get rent back without lifting a finger; `/me` also offers a manual reclaim (E-S7).
 
-> **The critical gate (R2):** every raffle must reach a terminal state in bounded time, or rent is stranded and the free model breaks. Settled is reachable three ways — winner claims, anyone reclaims to the creator after zero entries, anyone reclaims to the creator after claim expiry (D21). Backstop: if no reclaim succeeds, for example because the prize can't move (E-S10), entry accounts become closeable anyway once `claim expiry + 30 d grace` **decided** has passed. There is no path that leaves entrant rent locked.
+> **The critical gate (R2):** every raffle's entry accounts must become closeable in bounded time, or rent is stranded and the free model breaks. A terminal state does that, and Settled is reachable three ways — winner claims, anyone reclaims to the creator after zero entries, anyone reclaims to the creator after claim expiry (D21). Backstop: if no reclaim succeeds, for example because the prize can't move (E-S10), the raffle stays Drawn and its entry accounts become closeable anyway once `claim expiry + 30 d grace` **decided** has passed (E-S8). There is no path that leaves entrant rent locked.
 
 ### Prize settlement
 
@@ -295,7 +297,7 @@ No proceeds, no fees — settlement here means prizes out and rent back. The ren
 
 ### Raffle-level closing
 
-`close_raffle` — after the raffle is terminal, the Raffle PDA, escrow ATA and unused draw-fee lamports close with rent to the creator. It requires the prize to be out of escrow: a Core asset left on a closed Raffle PDA could never be signed out (D22). *This instruction was missing from the original instruction inventory; this spec adds it (G1) — ALG-588/589 to be updated.*
+`close_raffle` — after the raffle is terminal, the Raffle PDA, escrow ATA and unused draw-fee lamports close with rent to the creator. It requires the prize to be out of escrow: a Core asset left on a closed Raffle PDA could never be signed out (D22). It also requires every entry account to be closed, because `close_entry_accounts` checks its gate against the Raffle; anyone can close them, so nobody can stall it. A raffle whose prize never moves is never closed: the prize stays in escrow, and the creator, not the entrants, carries that rent. *This instruction was missing from the original instruction inventory; this spec adds it (G1) — ALG-588/589 to be updated.*
 
 ### Who pays what
 
@@ -304,7 +306,7 @@ No proceeds, no fees — settlement here means prizes out and rent back. The ren
 | Prize + its escrow rent | creator | Prize to winner; rent yes | Escrow rent at `close_raffle` |
 | Creator's ATA, only if it was closed before a reclaim | caller — the crank in practice | Not to the caller; the creator can close the ATA for the rent | At `reclaim_prize` |
 | VRF draw fee | creator | Unused portion yes | At `close_raffle` |
-| Entry account rent | entrant | Always — to the recorded payer | At `close_entry_accounts`, post-settlement |
+| Entry account rent | entrant | Always — to the recorded payer | At `close_entry_accounts`, post-settlement or at the E-S8 backstop |
 | Network gas | whoever signs | No — network cost, ~0.0001 SOL/tx | Disclosed in the UI; the only unrecoverable cost |
 | Crank gas | crank wallet | No — ops budget | Small SOL balance, monitored |
 
@@ -396,15 +398,15 @@ The normative behaviour matrix — the rows engineers write tests against (ALG-5
 
 | ID | Scenario | Specified behaviour | Acts |
 | --- | --- | --- | --- |
-| E-S1 | **Winner never claims** | The winner has 30 d **decided** from Drawn to `claim_prize`; after expiry anyone may `reclaim_prize`, which returns it to the creator. Either way the raffle reaches Settled, so rent closing is never blocked. No redraw in v1 (D5). | winner → anyone |
+| E-S1 | **Winner never claims** | The winner has 30 d **decided** from Drawn to `claim_prize`; after expiry anyone may `reclaim_prize`, which returns it to the creator. Either way the raffle reaches Settled and its accounts can close; if no reclaim succeeds, E-S8 applies. No redraw in v1 (D5). | winner → anyone |
 | E-S2 | Winning wallet cannot sign (PDA, lost keys, burned) | Indistinguishable from E-S1 — falls through to expiry → reclaim to the creator. There is no admin override to redirect a prize, deliberately. | anyone after expiry |
 | E-S3 | Winner claims twice / replay | State gate: `claim_prize` only from Drawn; the transfer and the Settled transition are atomic. | program |
 | E-S4 | Non-winner calls `claim_prize` | Reject — signer must equal the stored winner. | program |
 | E-S5 | Winner wants the prize sent elsewhere | v1 pays out only to an ATA of the winning wallet, or to that wallet as owner of a Core prize; transfer onward afterwards. Keeps the instruction simple and un-phishable. | program |
-| E-S6 | Rent-refund griefing — stranger cranks closes early or redirects rent | Closes are gated to terminal states and always refund the recorded payer; early closes fail, correct cranking is a public good. | program |
-| E-S7 | Entrant never closes their accounts | The cron sweeps closeable accounts post-settlement, refunding payers automatically; `/me` offers manual reclaim too. | cron |
-| E-S8 | Winner never claims *and* no reclaim succeeds | Backstop (R2): entry accounts become closeable after claim expiry + 30 d grace **decided** regardless of prize status. The prize stays in escrow until a reclaim succeeds; entrant rent does not wait for it. | program design |
-| E-S9 | Raffle-level rent (Raffle PDA, escrow ATA, draw fee) | `close_raffle` after terminal state, once the prize is out of escrow: rent and unused draw fee to the creator (G1, D22). | creator · cron |
+| E-S6 | Rent-refund griefing — stranger cranks closes early or redirects rent | Closes are gated to terminal states or the E-S8 backstop, and always refund the recorded payer; early closes fail, correct cranking is a public good. | program |
+| E-S7 | Entrant never closes their accounts | The cron sweeps closeable accounts, refunding payers automatically; `/me` offers manual reclaim too. | cron |
+| E-S8 | Winner never claims *and* no reclaim succeeds | Backstop (R2): the raffle stays Drawn, and `close_entry_accounts` opens after claim expiry + 30 d grace **decided** regardless of prize status, so entrant rent does not wait for the prize. The prize stays in escrow and `reclaim_prize` stays open. It doesn't need the entry accounts, so a later success still moves the raffle to Settled, and `close_raffle` follows (E-S9). | program design |
+| E-S9 | Raffle-level rent (Raffle PDA, escrow ATA, draw fee) | `close_raffle` after terminal state, once the prize is out of escrow and every entry account is closed: rent and unused draw fee to the creator (G1, D22). If the prize never moves, the raffle never closes, and that cost stays with the creator. | creator · cron |
 | E-S10 | The prize can't move — an SPL issuer froze the escrow, or a Core collection's update authority added a rule that blocks the transfer | `claim_prize` and `reclaim_prize` fail until the block lifts, and the claim window keeps running. There is no admin override. Entrant rent is safe through the E-S8 backstop, and `close_raffle` waits for the prize. Vetting at allowlisting is the control. | program · ops |
 | E-S11 | A stranger calls `reclaim_prize` | Allowed once a reclaim guard holds. The prize goes only to `raffle.creator`, so the caller gains nothing: it pays the gas and, if the creator's ATA was closed, the rent to recreate it (D21). | anyone |
 
@@ -440,7 +442,7 @@ Behavioural summary only — visual design follows the DressMe look (ALG-596), a
 | `/` | Raffle cards — prize image/name/collection, "Free entry" badge, entries claimed, countdown, your-entries indicator. Tabs Active / Ending soon / Past; filter by prize collection; search. Live-ish updates via polling. |
 | `/raffle/[id]` | Full prize info with explorer link, rules link, entrant count, odds. The one-click free entry flow: eligible pigs → batched claim transactions → progress per batch. State-aware CTA (table below). |
 | `/create` | Gated to admin + registry. Pick prize (wallet grid filtered to the Prize Allowlist, ineligible NFTs greyed with a "request allowlisting" hint) → set terms (duration within bounds, optional cap override, title/description for the rules page) → review the generated rules document → sign its Arweave upload → sign one transaction (escrow + init, carrying `rules_uri` + `rules_hash`) → share link + rules page (D20). |
-| `/me` | My entries with odds ("7 / 3,400 entries — 0.2%") and Full Gang indicator; won raffles highlighted with Claim prize; reclaim rent on settled raffles (one-click close); My raffles for creators with per-state chips and reclaim actions. |
+| `/me` | My entries with odds ("7 / 3,400 entries — 0.2%") and Full Gang indicator; won raffles highlighted with Claim prize; reclaim rent once entry accounts can close (one-click close); My raffles for creators with per-state chips and reclaim actions. |
 | `/admin` | Prize Allowlist / Prize mints / Creator Registry tabs (add: paste address → validate → preview → sign; remove); config panel (cap, bonus, bounds, pause — each change a signed transaction); change log from indexed events. |
 | `/winners` | Past raffles: prize, winner wallet, total entries, VRF proof link. Running totals — prizes given away, unique winners. The transparency page the fairness claim points to. |
 
@@ -451,7 +453,7 @@ Behavioural summary only — visual design follows the DressMe look (ALG-596), a
 | Active | Connect wallet | Claim N free entries | Entered M/N — claim more if eligible | — | View (cannot enter) |
 | Active · ended, undrawn | Draw pending | Draw pending · Trigger draw | Draw pending · Trigger draw | — | Zero entries → Reclaim prize |
 | Drawing | Drawing… | Drawing… | Drawing… | — | Drawing… |
-| Drawn | Winner announced + proof | Winner announced + proof | You didn't win this one | **Claim prize** — expires in N d | Awaiting winner claim · after expiry: Reclaim prize |
+| Drawn | Winner announced + proof | Winner announced + proof | You didn't win this one · past the backstop: Reclaim rent | **Claim prize** — expires in N d | Awaiting winner claim · after expiry: Reclaim prize |
 | Settled | Result + VRF proof | Result + proof | Reclaim rent | Prize claimed ✓ | Close raffle — rent back |
 | Cancelled | Cancelled + reason | Cancelled + reason | Reclaim rent | — | Reclaim prize · Close raffle |
 
@@ -565,7 +567,7 @@ Four sign-offs, each owning a slice of this document. Sign-off means: all §14 r
 | R14 | VRF fee is creator-funded at create (draw-fee lamports on the raffle); crank never pays net. | ALG-585 · ALG-587 |
 | R11 | Rename "whitelist" → Prize Allowlist and Creator Registry across issues and admin UI copy. | ALG-581 · ALG-589 · ALG-600 |
 | D6 | Optional bounded per-raffle cap override in `create_raffle`; GM raffles use cap 1. | ALG-585 · ALG-598 |
-| R2 | Close gate includes the expiry + grace backstop so rent can never strand. | ALG-588 · ALG-595 |
+| R2 | Close gate includes the expiry + grace backstop so rent can never strand: `close_entry_accounts` runs on a Drawn raffle past it and leaves the state alone, and the sweep covers those raffles. `close_raffle` requires `open_entry_accounts` = 0 on the Raffle. Details: [prize escrow design](./piggygang-raffles-prize-escrow.md) §6. | ALG-588 · ALG-595 · PIG-86 · PIG-144 · PIG-147 · PIG-153 · PIG-123 |
 | D19 | Replace the three `Config` collection addresses with three `MembershipRule`s (75 bytes each), snapshotted on the Raffle. `init_config`/`update_config` take and validate them. `claim_entries` checks one rule per NFT by `rule_index`, using the creator rule on the SPL path. Layout: [holder-proof design](./piggygang-raffles-holder-proof.md) §5. | PIG-86 · PIG-81 · PIG-84 |
 | D20 | `create_raffle` takes `rules_uri` (≤ 96 bytes) and `rules_hash` (`[u8; 32]`), stores both on the Raffle and emits them in `RaffleCreated`; Raffle seeds derivable before creation. The rules page enforces the `ar://<id>` format, verifies the hash and cross-checks the front-matter; `/create` and the GM crank generate and upload per-raffle documents. Details: [rules design](./piggygang-raffles-rules.md) §7. | PIG-86 · PIG-141 · PIG-127 · PIG-165 · PIG-124 · PIG-161 |
 | D21 | `reclaim_prize` takes any signer, pays only `raffle.creator`, and the caller funds a missing creator ATA. The crank reclaims for every raffle, and `raffles-gm` drops its own reclaim. `close_raffle` requires `prize_out` on the Raffle. Details: [prize escrow design](./piggygang-raffles-prize-escrow.md) §7. | PIG-82 · PIG-86 · PIG-153 · PIG-158 · PIG-161 |
