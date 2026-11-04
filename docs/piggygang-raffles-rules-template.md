@@ -82,7 +82,7 @@ Where a prize is taxable, the PiggyGang DAO handles the organizer's tax obligati
 - These rules are fixed when the raffle is created. Their SHA-256 fingerprint is recorded in the raffle account, so nobody can change them afterwards. On Solana mainnet this document is stored permanently on Arweave; on devnet, which is for testing, the copy may be purged after about three days. The raffle page shows whether the copy you are reading matches the fingerprint.
 - These rules apply together with the terms of service at {{terms_url}}.
 - Questions go to {{organizer.contact}}.
-- On-chain, the raffle records people by wallet address only, never by name or other personal data. The document published on Arweave also carries the organizer's name, contact and description.
+- On-chain, the raffle records people by wallet address only, never by name or other personal data. The published rules document also carries the organizer's name, contact and description.
 
 ## About this raffle — from the organizer
 
