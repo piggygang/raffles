@@ -25,7 +25,7 @@ lang: "{{lang}}"
 
 # Official rules — {{title}}
 
-**This is a free prize game (*nagradna igra*).** Nothing is bought, paid or burned to enter or to win. The only cost is the Solana network fee for your own transactions, and the small account deposit you front comes back to you after the raffle ends.
+**This is a free prize game (*nagradna igra*).** Nothing is bought, paid or burned to enter or to win. The only cost is the Solana network fee for your own transactions, and the small account deposit you front comes back to you when the raffle is settled or cancelled and your entry accounts close.
 
 ## 1. Organizer
 
@@ -69,20 +69,20 @@ The prize is {{prize.display}} (mint `{{prize.mint}}`, amount {{prize.amount}} i
 
 ## 8. Prize tax
 
-Where a prize is taxable, the PiggyGang DAO handles the organizer's tax obligations off-chain. The DAO may ask the winner for the details that requires. Those details are never written on-chain.
+Where a prize is taxable, the PiggyGang DAO handles the organizer's tax obligations off-chain. The DAO may ask the winner for the details it requires. Those details are never written on-chain.
 
 ## 9. Cancellation and pauses
 
-- Before the draw, the PiggyGang DAO admin may cancel the raffle, with the reason recorded on-chain. All entries are then void, the prize returns to the organizer, and deposits are refunded.
-- If the randomness service fails to deliver for 7 days, the admin may cancel the raffle in the same way.
+- Until the draw is requested, the PiggyGang DAO admin may cancel the raffle, with the reason recorded on-chain. All entries are then void, the prize returns to the organizer, and deposits are refunded.
+- Once the draw has been requested, the admin may cancel only after the randomness service has failed to deliver for 7 days, in the same way and with the same outcome.
 - A pause can delay claiming entries and the draw. It never extends the closing time, and never blocks a prize claim or a deposit refund.
 
 ## 10. These rules
 
-- These rules are fixed when the raffle is created. Their SHA-256 fingerprint is recorded in the raffle account, and this document is stored permanently on Arweave, so nobody can change them afterwards. The raffle page shows whether the copy you are reading matches the fingerprint.
+- These rules are fixed when the raffle is created. Their SHA-256 fingerprint is recorded in the raffle account, so nobody can change them afterwards. On Solana mainnet this document is stored permanently on Arweave; on devnet, which is for testing, the copy may be purged after about three days. The raffle page shows whether the copy you are reading matches the fingerprint.
 - These rules apply together with the terms of service at {{terms_url}}.
 - Questions go to {{organizer.contact}}.
-- The raffle stores wallet addresses only, never names or other personal data.
+- On-chain, the raffle records people by wallet address only, never by name or other personal data. The document published on Arweave also carries the organizer's name, contact and description.
 
 ## About this raffle — from the organizer
 

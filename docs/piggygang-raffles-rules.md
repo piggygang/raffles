@@ -58,8 +58,8 @@ Every raffle carries published rules (spec Invariant 2, D16). This document deci
 
 ### URI and gateways
 
-- **`rules_uri` is `ar://<id>`**, 48 bytes, where `<id>` is the Arweave data-item ID Turbo returns. The program checks only that it is 1–96 bytes of UTF-8 and doesn't parse the scheme, so integrity never depends on it.
-- **The app resolves `ar://<id>`** through `https://arweave.net/<id>` first, then a configured list of other ar.io gateways. No gateway is trusted, because the hash check (§3) runs on whatever comes back.
+- **`rules_uri` is `ar://<id>`**, 48 bytes, where `<id>` is the 43-character base64url Arweave data-item ID Turbo returns. The generators emit only this form. The program checks only that it is 1–96 bytes of UTF-8 and doesn't parse the scheme, so a later storage change needs no program upgrade. The rules page enforces the format, before any fetch.
+- **The app resolves `ar://<id>`** through `https://arweave.net/<id>` first, then a configured list of other ar.io gateways. It rejects any other scheme or a malformed ID without fetching, because `rules_uri` is creator-supplied and the page must never request an arbitrary URL. No gateway is trusted, because the hash check (§3) runs on whatever comes back.
 - **Upload tags** are for discovery only and are never trusted: `Content-Type: text/markdown; charset=utf-8`, `App-Name: piggygang-raffles`, `Rules-Schema: piggygang-raffles-rules/1`, `Raffle: <raffle address>`, `Cluster: <cluster>`, `Rules-Sha256: <hex>`.
 
 ### Devnet
@@ -80,7 +80,7 @@ Sources, checked 2026-11-02: [Irys — Migrating to the Irys L1](https://docs.ir
 
 | Where | Field | Type | Rule |
 | --- | --- | --- | --- |
-| `create_raffle` args, Raffle PDA | `rules_uri` | `String`, max 96 bytes | Non-empty (E-C8) |
+| `create_raffle` args, Raffle PDA | `rules_uri` | `String`, max 96 bytes | Non-empty (E-C8); the rules page enforces `ar://<id>` (§2) |
 | `create_raffle` args, Raffle PDA | `rules_hash` | `[u8; 32]` | Not all zero (E-C8) |
 | `RaffleCreated` event | both | as above | History after `close_raffle` removes the PDA (architecture §9) |
 
@@ -90,11 +90,12 @@ The program can't read the document, so it can't check that the content is right
 
 ### Verification on the rules page (PIG-127)
 
-1. **Fetch `rules_uri`** through the gateway list (§2) as raw bytes.
-2. **Hash the bytes** and compare with the on-chain `rules_hash` (from the Raffle, or the indexer's `RaffleCreated` record once the PDA is closed).
-3. **On a match:** render it, with "Rules fingerprint verified · sha256 …" and a link to the permanent copy. Content-addressed bytes never change, so the page can cache the verified document indefinitely, keyed by hash.
-4. **On a mismatch:** never render the fetched text as the rules. Show a warning with both hashes, and try the next gateway.
-5. **If nothing is reachable:** show the hash and the URI, and say the rules document is temporarily unavailable. The raffle itself is unaffected (E-I6).
+1. **Check `rules_uri`.** If it isn't `ar://<id>`, fetch nothing: show the hash, the URI and a warning (E-I6).
+2. **Fetch it** through the gateway list (§2) as raw bytes.
+3. **Hash the bytes** and compare with the on-chain `rules_hash` (from the Raffle, or the indexer's `RaffleCreated` record once the PDA is closed).
+4. **On a hash match:** run the §4 cross-checks against the same source. If they all pass, render the document with "Rules fingerprint verified · sha256 …" and a link to the permanent copy. If any fails, render it as unverified under the mismatch banner, without that label (E-I7). Content-addressed bytes never change, so the page can cache the document indefinitely, keyed by hash.
+5. **On a hash mismatch:** never render the fetched text as the rules. Show a warning with both hashes, and try the next gateway.
+6. **If nothing is reachable:** show the hash and the URI, and say the rules document is temporarily unavailable. The raffle itself is unaffected (E-I6).
 
 ## §4 — Document format
 
@@ -124,7 +125,7 @@ YAML restricted to the JSON subset in block style: maps, double-quoted strings a
 | `terms_url` | string | `"https://raffles.piggygang.net/terms"` | — |
 | `lang` | string | `"en"` | — |
 
-**A cross-check mismatch is a creation defect.** The generator builds the document and the transaction from the same inputs, so a mismatch means something changed between the two, for example a config edit. The page shows a banner naming the field and both values, and the admin decides whether the misstatement warrants a cancel (E-A1).
+**A cross-check mismatch is a creation defect.** The generator builds the document and the transaction from the same inputs, so a mismatch means something changed between the two, for example a config edit. The page still shows the document, because it is the one the raffle committed to, but as unverified: a banner names the field and both values, and the verified label is withheld (E-I7). Nothing cancels automatically, because the program can't read the document. The admin decides whether the misstatement warrants a cancel (E-A1), which is possible only until the draw is requested.
 
 **The start time isn't in the document.** It isn't known until the creation transaction lands. The body says the raffle opens on confirmation, and the page shows the on-chain creation time.
 
@@ -187,8 +188,8 @@ The architecture's per-period idempotency tag could double as the raffle nonce f
 | To | What |
 | --- | --- |
 | PIG-86 — account model | `rules_uri` (≤ 96 bytes) and `rules_hash` (`[u8; 32]`) on the Raffle. Raffle seeds derivable before creation, with no global counter (§5). |
-| PIG-141 / PIG-85 — `create_raffle` | Instruction data carries `rules_uri` and `rules_hash`. Reject an empty URI, a URI over 96 bytes, or an all-zero hash (E-C8). `RaffleCreated` carries both. Optional hardening: take the effective cap explicitly and assert the bonus equals the Config value, so the document's numeric terms equal the snapshot by construction. |
-| PIG-127 — rules page | The §3 verification steps, the §4 cross-checks and mismatch banner, raw HTML disabled, and caching by hash |
+| PIG-141 / PIG-85 — `create_raffle` | Instruction data carries `rules_uri` and `rules_hash`. Reject an empty URI, a URI over 96 bytes, or an all-zero hash (E-C8); the URI's format is the rules page's check (§2). `RaffleCreated` carries both. Optional hardening: take the effective cap explicitly and assert the bonus equals the Config value, so the document's numeric terms equal the snapshot by construction. |
+| PIG-127 — rules page | The §3 verification steps, starting with the URI format check; the §4 cross-checks and mismatch banner; the verified label only when all of them pass; raw HTML disabled; and caching by hash |
 | PIG-165 — `/create` publishing | Generator (§4), the Turbo upload with tags (§2), the prompt order (§5a), the permanence warning, and the cluster-scoped upload and gateway config |
 | PIG-124 / PIG-161 — GM | Per-raffle documents (§6), pre-flight including the upload price, the period tag as nonce, and the golden vector in Rust |
 | PIG-65 — user guide | "How to check the rules weren't changed": the fingerprint on the rules page and the permanent copy |
@@ -201,11 +202,12 @@ Made in this revision of the [spec](./piggygang-raffles-v1-spec.md):
 | Where | Change |
 | --- | --- |
 | §0 | D20; changelog entry |
-| §2 Invariant 2 | `create_raffle` requires `rules_uri` **and** `rules_hash`; the page renders only verified rules |
+| §2 Invariant 2 | `create_raffle` requires `rules_uri` **and** `rules_hash`; the page renders only a document that matches the hash |
 | §7 transition table, account model | Guard and Raffle fields include `rules_hash` |
 | E-C8 | Also rejects an all-zero hash |
-| E-I6 (new) | Rules document unreachable or not matching its hash |
-| §12 `/create` row, required legal elements | The upload step; rules shown only when verified; field list here |
+| E-I6 (new) | `rules_uri` not `ar://<id>`, or the rules document unreachable or not matching its hash |
+| E-I7 (new) | Document matches its hash, but a cross-checked term differs from the chain |
+| §12 `/create` row, required legal elements | The upload step; rules shown only when the hash matches; the verified label also needs the cross-checks; field list here |
 | §14 | D20 row |
 | §15 | `rules_hash` entry |
 | §16 | D20 checklist line and issue-update row |

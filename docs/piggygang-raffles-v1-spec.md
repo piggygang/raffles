@@ -424,7 +424,8 @@ The normative behaviour matrix — the rows engineers write tests against (ALG-5
 | E-I3 | Two-transaction claim, second fails | Partial state is valid — claims are incremental by design. The app resumes with "claim remaining N". | app |
 | E-I4 | Clock drift vs the countdown | The program gates on cluster time; the countdown is advisory and entry closes in the UI ~30 s early. | app |
 | E-I5 | GM cron misses a day | The missed raffle is simply skipped — no retroactive raffles. Cron alerting plus manual admin creation as fallback. | ops |
-| E-I6 | Rules document unreachable, or the fetched bytes don't match `rules_hash` | The app never renders unverified text as the rules: it tries the next gateway, and otherwise shows the hash, the URI and a warning. The raffle itself is unaffected — the commitment is on-chain, and any copy of the bytes that matches the hash is authentic (D20). | app |
+| E-I6 | `rules_uri` isn't `ar://<id>`, the rules document is unreachable, or the fetched bytes don't match `rules_hash` | The app fetches only `ar://<id>` URIs and never renders bytes that fail the hash as the rules: it tries the next gateway, and otherwise shows the hash, the URI and a warning. The raffle itself is unaffected — the commitment is on-chain, and any copy of the bytes that matches the hash is authentic (D20). | app |
+| E-I7 | The document matches `rules_hash`, but a cross-checked front-matter term differs from the chain | A creation defect. The app still shows the document, because it is the one the raffle committed to, but as unverified: no "Rules fingerprint verified" label, and a banner naming the field and both values. Nothing cancels automatically; the admin decides whether the misstatement warrants a cancel (E-A1), which is possible only until the draw is requested. | app · admin |
 
 ## §12 — UX surface
 
@@ -452,7 +453,7 @@ Behavioural summary only — visual design follows the DressMe look (ALG-596), a
 
 ### Required legal elements
 
-- Rules link on every raffle page, rendered from `rules_uri` only once the document matches `rules_hash`: organizer, duration, prize, draw method, 18+ note — full field list in the [rules design](./piggygang-raffles-rules.md) (D20).
+- Rules link on every raffle page, rendered from `rules_uri` only once the document matches `rules_hash`: organizer, duration, prize, draw method, 18+ note — full field list in the [rules design](./piggygang-raffles-rules.md) (D20). The "Rules fingerprint verified" label also needs every front-matter cross-check to pass; a matching document that fails one is shown only as unverified, and the admin decides what follows (E-I7).
 - The free explainer near every entry action: "Free — you only pay network gas, and the account rent comes back after the raffle settles."
 - ToS and responsible-use pages in the footer (ALG-582, ALG-605).
 
@@ -558,4 +559,4 @@ Four sign-offs, each owning a slice of this document. Sign-off means: all §14 r
 | D6 | Optional bounded per-raffle cap override in `create_raffle`; GM raffles use cap 1. | ALG-585 · ALG-598 |
 | R2 | Close gate includes the expiry + grace backstop so rent can never strand. | ALG-588 · ALG-595 |
 | D19 | Replace the three `Config` collection addresses with three `MembershipRule`s (75 bytes each), snapshotted on the Raffle. `init_config`/`update_config` take and validate them. `claim_entries` checks one rule per NFT by `rule_index`, using the creator rule on the SPL path. Layout: [holder-proof design](./piggygang-raffles-holder-proof.md) §5. | PIG-86 · PIG-81 · PIG-84 |
-| D20 | `create_raffle` takes `rules_uri` (≤ 96 bytes) and `rules_hash` (`[u8; 32]`), stores both on the Raffle and emits them in `RaffleCreated`; Raffle seeds derivable before creation. The rules page verifies the hash; `/create` and the GM crank generate and upload per-raffle documents. Details: [rules design](./piggygang-raffles-rules.md) §7. | PIG-86 · PIG-141 · PIG-127 · PIG-165 · PIG-124 · PIG-161 |
+| D20 | `create_raffle` takes `rules_uri` (≤ 96 bytes) and `rules_hash` (`[u8; 32]`), stores both on the Raffle and emits them in `RaffleCreated`; Raffle seeds derivable before creation. The rules page enforces the `ar://<id>` format, verifies the hash and cross-checks the front-matter; `/create` and the GM crank generate and upload per-raffle documents. Details: [rules design](./piggygang-raffles-rules.md) §7. | PIG-86 · PIG-141 · PIG-127 · PIG-165 · PIG-124 · PIG-161 |
