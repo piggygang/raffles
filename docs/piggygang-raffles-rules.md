@@ -113,10 +113,10 @@ YAML restricted to the JSON subset in block style: maps, double-quoted strings a
 | `organizer.name` | string | `"PiggyGang DAO"` | — (`CreatorEntry.label` for partners is a hint, not a check) |
 | `organizer.contact` | string | `"raffles@piggygang.net"` | — |
 | `title` | string | Raffle title | The on-chain title (architecture §9 flag 1) |
-| `prize.mint` | string | Mint address | The Raffle's prize mint |
+| `prize.mint` | string | Mint address, or the asset address of a Core prize | The Raffle's prize mint or asset |
 | `prize.amount` | string | `"1"`, in base units | The escrowed amount at create (`RaffleCreated`) |
 | `prize.display` | string | `"Piggy Gang #4521 (NFT)"` | — |
-| `prize.escrow` | string | Escrow ATA | The ATA derived from Raffle + mint |
+| `prize.escrow` | string | Escrow ATA, or the Raffle PDA for a Core prize | The ATA derived from Raffle + mint, or for a Core prize the Raffle, which owns the asset |
 | `ends_at` | string | `"2026-11-09T18:00:00Z"`, whole seconds | `raffle.end_ts` |
 | `entry.cap` | integer | `10` | The effective per-raffle cap (D6) |
 | `entry.full_gang_bonus` | integer | `3` | The snapshotted bonus |
