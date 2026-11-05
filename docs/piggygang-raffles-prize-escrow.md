@@ -121,6 +121,7 @@ The token path has a natural stop: an account with a balance can't be closed. Th
 - **It matters for Cancelled.** Settled always means the prize has left, but a Cancelled raffle holds the prize until `reclaim_prize` runs. PIG-153's terminal-state guard isn't enough on its own.
 - **It also stops a second reclaim** on a Cancelled raffle, which stays Cancelled after the first.
 - **A raffle whose prize can't move stays Drawn.** `close_entry_accounts` opens anyway at `drawn_at` + the claim window + 30 d grace, so entrants get their rent back (E-S8). The state doesn't change, and the prize stays in escrow.
+- **The backstop date is fixed on-chain.** Finalize writes `drawn_at` from cluster time in the instruction that enters Drawn (PIG-146), so every Drawn raffle has it. `end_ts` won't do, because the draw can finish long after the raffle ends. The claim window and the grace are program constants, so `close_entry_accounts` needs nothing but the Raffle and the clock.
 - **A later reclaim still works.** `reclaim_prize` doesn't need the entry accounts, so once the block lifts it moves the raffle to Settled and `close_raffle` follows. If the block never lifts, the Raffle never closes, and the creator carries its rent and the draw fee.
 - **`close_raffle` also waits for every entry account.** `close_entry_accounts` checks its gate against the Raffle, so an account still open when the Raffle closes could never refund. PIG-153's "or past the backstop" would allow exactly that. A new `open_entry_accounts` counter replaces it: `claim_entries` adds each account it creates, `close_entry_accounts` subtracts each one it closes, and `close_raffle` requires zero. Anyone can close entry accounts, so nobody can stall a creator's refund by leaving one open.
 
@@ -134,7 +135,7 @@ The token path has a natural stop: an account with a balance can't be closed. Th
 | PIG-142 — Core escrow | **Confirmed.** Scope: the §4 path through `create_raffle`, `claim_prize` and `reclaim_prize`, and the E-C10 check, replacing "plugins that would block the escrow transfer". Test against a cloned mainnet pig and collection. Add cases for each rejected plugin, and for a Cancelled raffle that can't close before the reclaim. |
 | PIG-82 — `claim_prize`, `reclaim_prize` | `reclaim_prize` takes any signer, pays only `raffle.creator`, funds a missing ATA through `init_if_needed`, and sets `prize_out`, as does `claim_prize` (§2, §6). Test a stranger's reclaim, a redirected destination, and a second reclaim. |
 | PIG-153 — `close_raffle` | Requires `prize_out` and `open_entry_accounts` = 0, replacing "closed or past the backstop" (§6) |
-| PIG-147 — `close_entry_accounts` | Scope stands: the backstop close runs on a Drawn raffle and leaves it Drawn. Subtract from `open_entry_accounts`. Add a test: backstop close, then a reclaim that settles the raffle (§6). |
+| PIG-147 — `close_entry_accounts` | Scope stands: the backstop close runs on a Drawn raffle past `drawn_at` + the claim window + the grace, and leaves it Drawn. Subtract from `open_entry_accounts`. Add tests: backstop close, then a reclaim that settles the raffle; and a draw that finishes well after `end_ts`, closed just before and just after the boundary (§6). |
 | PIG-144 — entry accounts | `claim_entries` adds each account it creates to `open_entry_accounts` (§6) |
 | PIG-123 — entry-account sweeps | Also cover Drawn raffles past the backstop (§6) |
 | PIG-158 — crank sweeps | The `reclaim_prize` sweep applies to every raffle, in the §2 order, with failures retried and alerted |
@@ -155,7 +156,8 @@ Made in this revision of the [spec](./piggygang-raffles-v1-spec.md):
 | §0 | D21 and D22; changelog entry |
 | §3 | Reclaim added to the permissionless steps and the crank's row |
 | §7 state diagram, transition table, timeline | `reclaim_prize` caller is anyone; the backstop close on a Drawn raffle; `close_raffle` needs the prize out and every entry account closed |
-| §7 account model | Prize escrow covers a Core asset |
+| §7 account model | Prize escrow covers a Core asset; `drawn_at` on the Raffle |
+| §8 | Finalize writes `drawn_at` |
 | §9 | Rent flow, the critical gate, prize settlement, `close_raffle` and the who-pays table |
 | §10, E-C6 | Reclaim rights become the reclaim destination |
 | E-C10 (new) | Core prizes that could leave escrow |
@@ -163,7 +165,7 @@ Made in this revision of the [spec](./piggygang-raffles-v1-spec.md):
 | E-S10, E-S11 (new) | A prize that can't move; a stranger's reclaim |
 | §12 | `/me` and the Drawn call to action offer rent back at the backstop |
 | §14 | D21 and D22 rows |
-| §15 | `crank` updated; `Core prize` added |
+| §15 | `crank` updated; `Core prize`, `drawn_at` and `claim expiry` added |
 | §16 | Checklist line and issue-update rows, including R2 |
 
 Also changed: registries §3, §4, §5, §7c, §7e and §11 Q2, and in the rules design and template the Core values of `prize.mint` and `prize.escrow`.

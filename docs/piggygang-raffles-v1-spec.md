@@ -37,7 +37,7 @@ On-chain raffles for holders of the three Piggy collections. Free entries, cappe
 | Issue | [ALG-578](https://linear.app/algolab-si/issue/ALG-578/feature-spec-piggygang-raffles-v1-free-holder-rewards-model) in project [PiggyGang Raffles](https://linear.app/algolab-si/project/piggygang-raffles-04d282beca26) |
 | Author | Marko Sabec — ALGOLAB |
 | Sources | Project brief; compliance review ALG-582 (done); design issues ALG-579–581, ALG-584–589, ALG-592–601, ALG-607 |
-| Changelog | `1.5 — 2026-11-04` — D21 and D22 added (PIG-132): `reclaim_prize` is permissionless with the destination fixed to `raffle.creator`, and Metaplex Core assets can be prizes, escrowed by transfer to the Raffle PDA. The R2 backstop becomes an explicit path: `close_entry_accounts` opens on a Drawn raffle at claim expiry + 30 d grace, and `close_raffle` waits for the prize and every entry account. §3, §7, §9, §10, §11, §12, §15 and §16 follow. Mechanics and mainnet evidence are in the [prize escrow design](./piggygang-raffles-prize-escrow.md).<br>`1.4 — 2026-11-02` — D20 added (PIG-110): rules hosted permanently on Arweave via ArDrive Turbo, with a `rules_hash` (sha256) on the Raffle so the app renders only the exact committed document; per-raffle rules for GM raffles too. §2, §7, §11, §12, §15 and §16 follow. Format, flows and the template are in the [rules design](./piggygang-raffles-rules.md).<br>`1.3 — 2026-11-01` — D19 added (PIG-111): holder proof by membership rules, because Piggy SOL Gang and Piggy Girl Gang have no certified collection on-chain; §5, §6, §7, §10, §11 and §15 follow. Mainnet evidence and the rule's layout are in the [holder-proof design](./piggygang-raffles-holder-proof.md).<br>`1.2 — 2026-08-27` — converted to markdown as the canonical in-repo format (the styled HTML deliverable is retired; Linear keeps the uploaded copies)<br>`1.1-review — 2026-08-27` — D1–D18 accepted as proposed by the project lead; markers flipped to decided<br>`1.0-draft — 2026-08-27` — initial complete draft for review |
+| Changelog | `1.5 — 2026-11-04` — D21 and D22 added (PIG-132): `reclaim_prize` is permissionless with the destination fixed to `raffle.creator`, and Metaplex Core assets can be prizes, escrowed by transfer to the Raffle PDA. The R2 backstop becomes an explicit path: `close_entry_accounts` opens on a Drawn raffle at claim expiry + 30 d grace, measured from `drawn_at`, and `close_raffle` waits for the prize and every entry account. §3, §7, §8, §9, §10, §11, §12, §15 and §16 follow. Mechanics and mainnet evidence are in the [prize escrow design](./piggygang-raffles-prize-escrow.md).<br>`1.4 — 2026-11-02` — D20 added (PIG-110): rules hosted permanently on Arweave via ArDrive Turbo, with a `rules_hash` (sha256) on the Raffle so the app renders only the exact committed document; per-raffle rules for GM raffles too. §2, §7, §11, §12, §15 and §16 follow. Format, flows and the template are in the [rules design](./piggygang-raffles-rules.md).<br>`1.3 — 2026-11-01` — D19 added (PIG-111): holder proof by membership rules, because Piggy SOL Gang and Piggy Girl Gang have no certified collection on-chain; §5, §6, §7, §10, §11 and §15 follow. Mainnet evidence and the rule's layout are in the [holder-proof design](./piggygang-raffles-holder-proof.md).<br>`1.2 — 2026-08-27` — converted to markdown as the canonical in-repo format (the styled HTML deliverable is retired; Linear keeps the uploaded copies)<br>`1.1-review — 2026-08-27` — D1–D18 accepted as proposed by the project lead; markers flipped to decided<br>`1.0-draft — 2026-08-27` — initial complete draft for review |
 
 **What this document is authoritative for:** behaviour — entry rules, lifecycle states and transitions, edge-case outcomes, admin semantics, and the legal invariants. Where an implementation issue disagrees with this spec, the spec wins and the issue gets updated (§16 lists the known updates).
 
@@ -218,10 +218,10 @@ stateDiagram-v2
 | Active → Active | `claim_entries` | holder | now < end_ts · signer ≠ creator · per-NFT proofs pass · cap respected · not paused |
 | Active → Drawing | `request_draw` | anyone | now ≥ end_ts · total_entries ≥ 1 · not paused |
 | Drawing → Drawing | `request_draw` (re-request) | anyone | retry timeout elapsed since last request (E-D4) |
-| Drawing → Drawn | `fulfill_draw` + finalize | VRF · anyone | randomness delivered · supplied EntryPosition range contains winner_index · winner pubkey stored (R18) |
+| Drawing → Drawn | `fulfill_draw` + finalize | VRF · anyone | randomness delivered · supplied EntryPosition range contains winner_index · winner pubkey and `drawn_at` stored (R18) |
 | Drawn → Settled | `claim_prize` | winner | signer = stored winner · within 30 d claim window **decided** |
 | Drawn → Settled | `reclaim_prize` | anyone | claim window expired (E-S1) · prize to `raffle.creator` only (D21) |
-| Drawn → Drawn | `close_entry_accounts` (backstop) | anyone | now ≥ claim expiry + 30 d grace **decided** (E-S8) · rent → recorded payer · the prize stays in escrow |
+| Drawn → Drawn | `close_entry_accounts` (backstop) | anyone | now ≥ `drawn_at` + 30 d claim window + 30 d grace **decided** (E-S8) · rent → recorded payer · the prize stays in escrow |
 | Active → Settled | `reclaim_prize` | anyone | now ≥ end_ts · total_entries = 0 (E-D1) · prize to `raffle.creator` only (D21) |
 | Active → Cancelled | `cancel_raffle` | admin | before request_draw · reason recorded (E-A1) |
 | Drawing → Cancelled | `cancel_raffle` (break-glass) | admin | ≥ 7 d stuck in Drawing **decided** (E-D5) |
@@ -252,7 +252,7 @@ flowchart LR
     CFG["Config PDA<br>3 membership rules · cap · bonus<br>duration bounds · pause<br>admin authority (multisig)"]
     REG["Creator Registry<br>PDA per approved wallet"]
     ALW["Prize Allowlist<br>PDA per collection / mint"]
-    RAF["Raffle PDA<br>creator · prize mint · end_ts · state<br>total_entries · winner · vrf state<br>rules_uri · rules_hash · draw-fee lamports<br>snapshot: membership rules, cap,<br>bonus, bounds — frozen per raffle"]
+    RAF["Raffle PDA<br>creator · prize mint · end_ts · state<br>total_entries · winner · drawn_at · vrf state<br>rules_uri · rules_hash · draw-fee lamports<br>snapshot: membership rules, cap,<br>bonus, bounds — frozen per raffle"]
     ESC["Prize escrow<br>ATA with PDA authority, or a Core<br>asset owned by the Raffle PDA"]
     ER["EntryReceipt PDA<br>seeds: raffle, nft_mint<br>one per entered NFT<br>rent payer recorded"]
     EP["EntryPosition PDA<br>seeds: raffle, wallet — one per wallet<br>entries_claimed · entry ranges<br>collections_seen bitmask<br>bonus_awarded flag<br>rent payer recorded"]
@@ -274,7 +274,7 @@ flowchart LR
 - **Request.** `request_draw` is permissionless once `now ≥ end_ts` with ≥ 1 entry. It requests randomness from the VRF provider — Switchboard On-Demand **decided**, ORAO as the evaluated fallback (D3) — and moves the raffle to Drawing.
 - **Fee.** The VRF request fee is deposited by the creator at `create_raffle` into the raffle (draw-fee lamports), so cranking is never a losing trade and entrants never touch it — free stays free (resolves R14). Unused fee returns to the creator at `close_raffle`.
 - **Fulfill.** The provider delivers randomness; `winner_index = randomness % total_entries`. Modulo bias is negligible and accepted — u64 randomness against at most tens of thousands of entries biases below 2⁻⁴⁰, documented on the fairness page (E-D8).
-- **Finalize.** A permissionless finalize step passes the `EntryPosition` whose entry range contains `winner_index`; the program verifies the range and the raffle it belongs to, then stores the position's wallet as `winner` on the Raffle PDA. Wrong accounts fail constraints; the right account is deterministically findable from the index (E-D6, R18).
+- **Finalize.** A permissionless finalize step passes the `EntryPosition` whose entry range contains `winner_index`; the program verifies the range and the raffle it belongs to, then stores the position's wallet as `winner` and the cluster time as `drawn_at` on the Raffle PDA, in the same instruction that moves the raffle to Drawn. Wrong accounts fail constraints; the right account is deterministically findable from the index (E-D6, R18).
 - **Retry.** If fulfillment doesn't arrive within the retry timeout, `request_draw` may re-request; the cron does this automatically and escalates to an alert after repeated failures (ALG-595). Every request is visible on-chain.
 - **Verifiability.** The winners page links the VRF proof and the draw transaction per raffle; anyone can recompute `winner_index` from the public randomness and `total_entries`. "Provably fair" is a checkable claim, not a slogan.
 
@@ -536,6 +536,8 @@ Pointer for reviewers: the v2 direction (Merkle snapshot entry mode) is designed
 | `DAS` | Digital Asset Standard API (Helius) — how the service reads wallet holdings off-chain. |
 | `rent` | Lamports locked to keep a Solana account alive; recovered when the account closes. Fronted by entrants, always refunded (§9). |
 | `settlement` | Everything after the draw: prize out (claim or reclaim), then accounts closed and rent returned. |
+| `drawn_at` | Cluster time at which finalize moved the raffle to Drawn, stored on the Raffle. The claim window runs from it, not from `end_ts`, because a draw can finish long after the raffle ends. |
+| `claim expiry` | `drawn_at` + the 30 d claim window (D5). The backstop opens 30 d later (E-S8). Both periods are program constants, so neither can change once a raffle is Drawn. |
 
 ## §16 — Sign-off
 
