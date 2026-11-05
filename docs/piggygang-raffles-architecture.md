@@ -109,6 +109,12 @@ flowchart TB
 5. Each lane keeps its own cursor, and `last_processed_slot` persists only on `SlotCheckpoint`. Neither lane replays: a WebSocket has no `fromSlot`, so `ResumeFrom::Slot` is only a floor, and a webhook delivery can be lost for good. A second lane narrows the gap, and the signature sweep (flow f) closes it on a cursor of its own.
 6. Transactions are the only signal, on both lanes — no per-PDA `accountSubscribe` in v1. Account state is a fold of the event log; the snapshot sweep (flow f) catches divergence. Fewer subscriptions, fewer credits, one code path to trust.
 
+**Signatures can arrive out of order.** The lanes race, and the sweep recovers old transactions after newer ones have landed. So the writer follows the contract the indexer's `activity` writer already keeps. It locks the raffle (in address order if a bundle touches several), inserts the events, and applies them to the projections only when they are in order: the raffle's create is applied, and no event is older than the raffle's newest applied slot. Anything else, such as a claim that arrives before its raffle's create, is stored but not applied and flags the raffle for rebuild, all in the same per-signature transaction. A flag-driven job on the ingester's scheduler then deletes that raffle's projection rows and re-derives them from `raffle_events` in one Postgres transaction, using the same fold as cold start. The registry and config mirrors follow the same contract, per entry.
+
+- **Order inside a slot isn't known.** The ingest path carries no transaction position, so the fold sorts by slot, signature and `event_index` only to be deterministic, and must not depend on that tie-break. Events carry absolute values (`EntriesClaimed` carries its ranges), and state only moves forward along the spec's state machine.
+- **Closed raffles keep their rows,** because the winners page and draw verification still read them once the PDAs are gone. A late event goes through the same rebuild: it can correct a closed raffle's history but can't reopen it.
+- **What this guarantees.** A late event never moves a projection backwards, and the same transactions give the same projections whatever order they arrived in. Staleness has two bounds: a flagged raffle waits for the scheduler's next pass (a 10 s tick, longer while a sweep runs), and a transaction neither lane delivered waits for the signature sweep. `asOfSlot` can't show a hole below it, so correctness never rests on these rows: the crank verifies on-chain (flow c), and a rejected claim is rechecked on-chain (flow a).
+
 ### c — Draw lifecycle
 
 1. The crank ticks (~30 s). Hint: `GET /v1/raffles?state=active` from the public API, filtered to `end_ts ≤ now ∧ entries ≥ 1`. If the API is down: fall back to `getProgramAccounts` with a Raffle-discriminator memcmp — raffle counts are small, chain scanning is cheap.
@@ -138,7 +144,7 @@ The indexer's as-built reconciliation covers NFT ownership only: a 30-second DAS
 | Mechanism | Cadence | What it does |
 | --- | --- | --- |
 | **Signature sweep** | ~10 min | `getSignaturesForAddress(program_id)` from the tip back to the sweep's own cursor; fetch and ingest anything either lane missed. It never starts from a lane's cursor, which has already moved past what that lane missed. Its cursor moves up to the walk's newest signature only after every signature in the range is durably ingested: a failed fetch or ingest leaves it in place, so that signature stays retryable and a walk cut short repeats on the next sweep. The gap closer, and load-bearing, because neither lane replays (PIG-120). |
-| **Snapshot diff** | hourly | `getProgramAccounts` with discriminator filters, diffed against projections; divergence is logged and repaired (PIG-156). |
+| **Snapshot diff** | hourly | `getProgramAccounts` with discriminator filters, diffed against projections; divergence is logged and repaired. Closed raffles are skipped, because a missing PDA is expected there (PIG-156). |
 | **Cold start** | on demand | Empty database → `indexer-admin backfill-raffles` replays `getSignaturesForAddress` + `getTransaction` from the program's deploy slot → full rebuild (PIG-159). This is the rebuildability guarantee (§9). NFT ownership continues to come from the existing collection indexer's DAS sweeps. |
 
 ### g — Frontend reads
@@ -155,7 +161,7 @@ Split by volatility instead of fighting the org's `revalidate = 300` convention:
 
 ### h — Eligible entries
 
-Computed entirely in `services/api` against Postgres — no chain call in the request path: the wallet's held Piggies (existing ownership tables, DAS-reconciled) minus mints with an `EntryReceipt` for this raffle, intersected with the raffle's snapshotted membership rules, then cap-remaining and Full-Gang-bonus preview from the wallet's `EntryPosition`. The response carries `asOfSlot`; a just-bought pig may lag until ownership catches up, but the claim transaction carries the on-chain proof — the API can only under- or over-promise the UI, never affect correctness. The claim transactions also need each Token Metadata pig's token account, which the indexer doesn't store yet (PIG-135).
+Computed entirely in `services/api` against Postgres — no chain call in the request path: the wallet's held Piggies (existing ownership tables, DAS-reconciled) minus mints with an `EntryReceipt` for this raffle, intersected with the raffle's snapshotted membership rules, then cap-remaining and Full-Gang-bonus preview from the wallet's `EntryPosition`. An optional `exclude` list drops mints the client ruled out or couldn't confirm on-chain, so the next eligible mints can surface (spec §6). The response carries `asOfSlot`; a just-bought pig may lag until ownership catches up, but the claim transaction carries the on-chain proof — the API can only under- or over-promise the UI, never affect correctness. The claim transactions also need each Token Metadata pig's token account, which the indexer doesn't store yet (PIG-135).
 
 ## §4 — Deployment topology
 
@@ -232,7 +238,7 @@ All new endpoints inherit the frozen conventions: camelCase with every field req
 | `GET /v1/raffles/{address}/entries?cursor=` | Entry positions and ranges (draw verification) | public, max-age=15 + ETag |
 | `GET /v1/winners?cursor=` | History: prize, winner, entries, proof — the transparency page | public, max-age=300 + ETag |
 | `GET /v1/wallets/{address}/raffle-entries?cursor=` | My entries across raffles, odds, claimables, closeable rent | private, max-age=5 |
-| `GET /v1/wallets/{address}/eligible-entries?raffle=` | Flow h — eligible mints, cap remaining, bonus preview, `asOfSlot` | private, no-store |
+| `GET /v1/wallets/{address}/eligible-entries?raffle=&exclude=` | Flow h — eligible mints, cap remaining, bonus preview, `asOfSlot` | private, no-store |
 | `GET /v1/raffles-config` | Prize Allowlist, Creator Registry, config snapshot values, pause state | public, max-age=60 + ETag |
 | `GET /v1/raffles-config/changes?cursor=` | Admin change log: registry, authority and config events | public, max-age=60 + ETag |
 
