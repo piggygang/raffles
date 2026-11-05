@@ -39,7 +39,7 @@ The organizer is {{organizer.name}}, contact {{organizer.contact}}. The organize
 
 ## 3. Prize
 
-The prize is {{prize.display}} (mint `{{prize.mint}}`, amount {{prize.amount}} in base units). It is held in escrow account `{{prize.escrow}}` from the moment the raffle is created. Only the program can release it: to the winner, or back to the organizer in the cases sections 6, 7 and 9 describe.
+The prize is {{prize.display}} (asset `{{prize.mint}}`, amount {{prize.amount}} in base units). It is held in escrow account `{{prize.escrow}}` from the moment the raffle is created. Only the program can release it: to the winner, or back to the organizer in the cases sections 6, 7 and 9 describe.
 
 ## 4. Who can enter
 

@@ -33,7 +33,7 @@ The two on-chain registries that gate raffle creation in the free model: which a
 | Author | Marko Sabec — ALGOLAB |
 | Implements | [Feature spec](./piggygang-raffles-v1-spec.md) (decisions D1–D18 accepted) and [architecture](./piggygang-raffles-architecture.md) — product semantics unchanged; the few mechanical additions are listed in §9 |
 | Defers | The rest of the Config and Raffle PDA layouts (ALG-584) · prize escrow mechanics and supported token standards (ALG-585) · admin UI implementation (ALG-600) · API shapes (ALG-593) |
-| Changelog | `1.0 — 2026-10-27` — initial proposal |
+| Changelog | `1.1 — 2026-11-04` — `PrizeKind` 2 `CoreCollection` (PIG-132, spec D22)<br>`1.0 — 2026-10-27` — initial proposal |
 
 **What this document is authoritative for:** the byte layout and seeds of the registry accounts; the registry and authority instructions and their validation; the registry checks inside `create_raffle`; the admin authority setup; the admin runbooks.
 
@@ -134,7 +134,8 @@ No label here, unlike `CreatorEntry`. Collection and token names come from metad
 | ---: | --- | --- | --- |
 | 0 | `Collection` | A Metaplex Certified Collection — the collection NFT's mint (the issue's "verified collection address") | Any NFT whose Token Metadata `collection` is `{ key: address, verified: true }` |
 | 1 | `Mint` | An SPL Token mint | Exactly that mint. Either a single NFT (a 1/1, a DressMe voucher) or a fungible SPL token (D11). SOL prizes are wSOL, so allowlisting SOL means a `Mint` entry for the wSOL mint. |
-| 2+ | — | unassigned | Reserved for Metaplex Core collections and assets if the escrow design adds Core (§11 Q2). The `u8` leaves room without migrating any account. |
+| 2 | `CoreCollection` | A Metaplex Core collection | Any Core asset whose `update_authority` is `Collection(address)` (spec D22) |
+| 3+ | — | unassigned | 3 is reserved for single Core assets (§11 Q2). The `u8` leaves room without migrating any account. |
 
 **Budget.** 20 creators plus 60 prize entries lock about 0.12 SOL of vault rent, all of it returned when the entries are removed.
 
@@ -149,7 +150,7 @@ Every instruction here is open while the program is paused, per the spec §10 pa
 | `accept_authority` | `pending_authority` | — | `pending_authority != default` and signer matches it | `authority = pending_authority`; `pending_authority = default` | `AuthorityAccepted` |
 | `creator_add` | `authority` | `wallet: Pubkey`, `label: [u8; 32]` | `wallet != default`; label is non-empty, valid UTF-8 after trimming zero padding | `init` CreatorEntry. Fails if it already exists, so duplicates are loud. | `CreatorAdded` |
 | `creator_remove` | `authority` | `wallet: Pubkey` | Entry exists at its seeds | `close` CreatorEntry → rent to `authority` | `CreatorRemoved` |
-| `allowlist_add` | `authority` | `kind: u8`, `address: Pubkey` | `kind ∈ {0, 1}`. `address_account.key == address`, owned by the **classic SPL Token program**, and unpacks as an initialized `Mint`. For `Collection`, also `decimals == 0`. The admin attests that a `Collection` address is a Metaplex Certified Collection mint; the program does not check certification on-chain. | `init` PrizeEntry. Fails if it already exists. | `PrizeAllowlisted` |
+| `allowlist_add` | `authority` | `kind: u8`, `address: Pubkey` | `kind ∈ {0, 1, 2}`. `address_account.key == address`. For kinds 0 and 1, owned by the **classic SPL Token program** and unpacks as an initialized `Mint`. For `Collection`, also `decimals == 0`. For `CoreCollection`, owned by mpl-core with key `CollectionV1`. The admin attests that a `Collection` address is a Metaplex Certified Collection mint; the program does not check certification on-chain. | `init` PrizeEntry. Fails if it already exists. | `PrizeAllowlisted` |
 | `allowlist_remove` | `authority` | `kind: u8`, `address: Pubkey` | Entry exists at its seeds | `close` PrizeEntry → rent to `authority` | `PrizeDelisted` |
 
 The `allowlist_add` owner-and-shape check catches the common admin mistake of pasting a wallet, a marketplace slug or a Token-2022 mint. It cannot judge whether a collection is reputable. That judgement stays with the humans (§7 vetting checklist).
@@ -166,7 +167,7 @@ The `allowlist_add` owner-and-shape check catches the common admin mistake of pa
 | `PrizeAllowlisted` | `kind`, `address` |
 | `PrizeDelisted` | `kind`, `address` |
 
-**Errors.** `Unauthorized` (signer ≠ authority) · `InvalidInitializer` (signer ≠ upgrade authority) · `NoPendingAuthority` · `InvalidCreator` (default pubkey) · `InvalidLabel` · `InvalidPrizeKind` · `InvalidPrizeAddress` (not an initialized classic-SPL mint, or `decimals ≠ 0` for a collection).
+**Errors.** `Unauthorized` (signer ≠ authority) · `InvalidInitializer` (signer ≠ upgrade authority) · `NoPendingAuthority` · `InvalidCreator` (default pubkey) · `InvalidLabel` · `InvalidPrizeKind` · `InvalidPrizeAddress` (not an initialized classic-SPL mint, `decimals ≠ 0` for a collection, or not a Core collection for kind 2).
 
 **Batching.** Each instruction handles one entry. Onboarding a partner usually means `creator_add` plus one or two `allowlist_add`, which fit in a single Squads proposal. Large allowlist seedings split across proposals.
 
@@ -229,8 +230,9 @@ match PrizeKind::try_from(entry.kind)? {
 
 - **The creator gate is one comparison or one account.** The `creator_entry` seeds tie it to `creator.key()`, so someone else's entry fails the constraint. When the admin creates, the client passes `None` (a passed entry is harmless).
 - **The prize gate has one path per kind.** An entry account is valid by construction: it is owned by the program, carries the `PrizeEntry` discriminator, and only `allowlist_add` can create one. The seeds constraint is defense in depth. `load_token_metadata` checks the account is owned by Token Metadata and derived from `["metadata", TOKEN_METADATA_ID, prize_mint]` before deserializing it.
+- **Core prizes take a third path.** For `CoreCollection`, the client passes the asset and its collection in place of `prize_mint` and `prize_metadata`. The membership and plugin checks are in the [prize escrow design](./piggygang-raffles-prize-escrow.md) §4.
 - **The admin gets no prize bypass** (RD5). DAO Drops allowlist their prize too. A DAO proposal can bundle `allowlist_add` and `create_raffle` in one vault transaction, so the cost is one extra instruction. In return, "every escrowed prize passed the allowlist" holds without exception, which is what the winners page can honestly claim.
-- **Nothing is written to the registries, and nothing about them is stored on the Raffle PDA.** `create_raffle` takes both entries read-only, keeps no counters on them, and records no back-reference. That is why `creator_remove`/`allowlist_remove` cannot break a live raffle: reclaim and close rights key on `raffle.creator` (E-C6), and the prize already sits in escrow (E-C7). For provenance, the `RaffleCreated` event (ALG-584) should carry the admitting entry's `kind` + `address` and whether the creator passed as admin or as a registry member. That way the winners page and the indexer can show *why* a prize was admitted without any on-chain coupling.
+- **Nothing is written to the registries, and nothing about them is stored on the Raffle PDA.** `create_raffle` takes both entries read-only, keeps no counters on them, and records no back-reference. That is why `creator_remove`/`allowlist_remove` cannot break a live raffle: reclaim and close pay `raffle.creator` (E-C6), and the prize already sits in escrow (E-C7). For provenance, the `RaffleCreated` event (ALG-584) should carry the admitting entry's `kind` + `address` and whether the creator passed as admin or as a registry member. That way the winners page and the indexer can show *why* a prize was admitted without any on-chain coupling.
 - **Races resolve by transaction order.** If `creator_remove` lands first, the later `create_raffle` fails because its `creator_entry` no longer deserializes. If `create_raffle` lands first, the raffle exists and runs to completion. Neither order leaves partial state.
 - **Errors:** `CreatorNotApproved` (E-C1) · `PrizeNotAllowlisted` (E-C2) · `PrizeCollectionUnverified` (a matching collection key without the verified flag — a separate code so support can tell "wrong collection" from "lookalike") · `PrizeNotNft`.
 
@@ -317,6 +319,7 @@ Seeding before the handover keeps bootstrap to one sitting. Requiring the accept
 The vetting checklist, done before proposing:
 
 - **Collections:** a real Metaplex Certified Collection (the collection NFT mint), not a first-creator address or a marketplace slug. Legacy collections identified only by creator address can't be allowlisted as a collection; allowlist their individual mints instead. The update authority is known, the collection isn't flagged on major marketplaces, and its items use a token standard the escrow supports (Q1: pNFTs).
+- **Core collections:** the collection account itself, not an asset. The update authority is known and trusted: it can't take an escrowed asset, but it can block transfers after escrow (spec E-S10). The collection has no permanent delegates or external plugins, which `create_raffle` would reject anyway (E-C10).
 - **NFT mints:** supply 1, decimals 0, metadata as expected.
 - **Fungible mints:** classic SPL Token only. The program rejects Token-2022 (RD10). If the mint has a **freeze authority**, the issuer could freeze the escrow and strand the prize (entrant rent is unaffected, spec §9). Accept that only for reputable issuers like USDC; reject it for unknown tokens.
 
@@ -327,7 +330,7 @@ The vetting checklist, done before proposing:
 ### e — A creator key is compromised
 
 1. **`creator_remove` immediately,** in one proposal. This stops new raffles. Don't pause: a pause would freeze every honest raffle and gain nothing.
-2. **Don't cancel that creator's live raffles.** `cancel_raffle` makes the prize reclaimable by `raffle.creator`, which is now the attacker's key. Left alone, the raffle draws and the winner claims. The compromised key only gets value through the paths that were always its own: zero-entry reclaim, unclaimed after 30 d, and `close_raffle` rent.
+2. **Don't cancel that creator's live raffles.** `cancel_raffle` makes the prize reclaimable to `raffle.creator`, which is now the attacker's key, and anyone can trigger that reclaim (D21). Left alone, the raffle draws and the winner claims. The compromised key only gets value through the paths that were always its own: zero-entry reclaim, unclaimed after 30 d, and `close_raffle` rent.
 3. Existing rules pages can't be altered, because `rules_uri` is content-addressed (architecture §9, flag 2). No new raffles can be created under the key after step 1.
 4. Communicate. The `/` and `/raffle/[id]` pages could flag raffles whose creator is no longer in the registry (Q8).
 
@@ -399,7 +402,7 @@ Mechanical additions the spec didn't spell out. Product semantics are unchanged.
 | # | Question | Owner | Recommendation |
 | --- | --- | --- | --- |
 | Q1 | **pNFT prizes.** Many current collections are programmable NFTs, whose token accounts are frozen and can only move through Token Metadata `TransferV1`. | ALG-585 | The allowlist needs no change, since pNFT mints are classic SPL. The escrow needs the `TransferV1` path. Decide before onboarding partners: without that path, a pNFT prize fails atomically at create. |
-| Q2 | **Core prizes**, including Piggy Gang itself | ALG-585 | `PrizeKind` 2 (`CoreCollection`) / 3 (`CoreAsset`) plus a Core escrow path (the asset owned by a PDA instead of an ATA). Out of v1 unless the escrow design takes it on. |
+| Q2 | **Core prizes**, including Piggy Gang itself | PIG-132 | Resolved by spec D22: `PrizeKind` 2 (`CoreCollection`) and the escrow path in the [prize escrow design](./piggygang-raffles-prize-escrow.md). Kind 3 (`CoreAsset`) stays unassigned until a one-off Core prize needs it. |
 | Q3 | Creating Squads proposals from the browser without web3.js (CLAUDE.md: no Buffer polyfill) | ALG-600 | Compare `@sqds/multisig`'s bundle cost against hand-encoding `vault_transaction_create` + `proposal_create` alongside `@solana/kit`. Fallback: export the instruction for the Squads app's transaction builder. |
 | Q4 | Multisig members and threshold | DAO admin | ≥ 2-of-3, members on hardware wallets |
 | Q5 | Intake process behind the "request allowlisting" hint | DAO admin | An off-chain form that feeds the §7c checklist; nothing on-chain |
