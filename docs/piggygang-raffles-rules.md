@@ -35,7 +35,7 @@ Every raffle carries published rules (spec Invariant 2, D16). This document deci
 
 ## §1 — The answers
 
-- **Hosting: permanent Arweave storage, uploaded through ArDrive Turbo.** Irys, the issue's suggestion, stopped uploading to Arweave on 2026-11-01 (§2). The creator's wallet signs and pays for the upload in SOL; `raffles-gm` pays from the GM key.
+- **Hosting: permanent Arweave storage, uploaded through ArDrive Turbo.** Irys, the issue's suggestion, stopped uploading to Arweave on 2026-11-01 (§2). For an ordinary raffle the creator's wallet signs and pays for the upload in SOL. For a Squads raffle the proposer's own wallet does, because the vault can't sign an upload (§5b). `raffles-gm` signs and pays with the GM key.
 - **Integrity: a `rules_hash` on the Raffle.** It is the sha256 of the exact document bytes, passed to `create_raffle` and stored next to `rules_uri`. The app renders rules only when the fetched bytes hash to it. The hash is the commitment; Arweave only provides availability, so any copy that matches is authentic (§3).
 - **Format: Markdown with YAML front-matter.** The front-matter holds machine-readable terms that the rules page cross-checks against the chain. The body is the human-readable rules, generated from a fixed, logic-free template (§4).
 - **GM raffles: one document per raffle,** generated and uploaded by `raffles-gm` with the same template. A standing document per cadence would leave the prize and dates to chain lookups, which is exactly what needed legal sign-off; per-raffle documents need no special approval and cost almost nothing (§6).

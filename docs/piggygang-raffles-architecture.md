@@ -98,7 +98,7 @@ flowchart TB
 2. A client island connects the wallet (Wallet Standard, dressme's `lib/wallet.ts` pattern — read-only connect first).
 3. The client fetches `GET /v1/wallets/{addr}/eligible-entries?raffle=…` directly from the API (CORS, §6). The response carries `asOfSlot` so the UI can label freshness. Advisory only — the program is the enforcer.
 4. The client builds `claim_entries` transactions from the IDL (~6 NFT proofs per tx; a cap-10 claim is normally two), the wallet signs, and the client sends via `NEXT_PUBLIC_SOLANA_RPC_URL` (Helius, provider-restricted).
-5. The confirmed transaction reaches the ingester over the WebSocket within ~1–2 s, with the webhook lane as a second path. The UI optimistically updates, then polls with `If-None-Match` until the receipts appear; on a lost race the program rejects and the UI refreshes the eligible list ("this pig was just used").
+5. The confirmed transaction reaches the ingester over the WebSocket within ~1–2 s, with the webhook lane as a second path. The UI optimistically updates, then polls the wallet's entries until the receipts appear (flow g); on a lost race the program rejects and the UI refreshes the eligible list ("this pig was just used").
 
 ### b — Event ingestion
 
@@ -106,7 +106,7 @@ flowchart TB
 2. Helius delivers it on two lanes, selected by `INGEST_TRANSPORTS` (production is configured for `ws,webhook`): Enhanced WebSockets, and a webhook the ingester receives at `POST /webhooks/helius`. Both lanes compile from one address list, `registry::tracked_addresses`, so the raffles program id joins that list (PIG-130). It reaches the single `TransactionFilter` in the `SubscriptionSpec`, live-updatable via the watch channel, and the webhook's `accountAddresses` through `indexer-admin webhook`. It doesn't get a filter of its own: `claim_entries` also names tracked mints, so a second filter would deliver and bill those transactions twice. The tight address list keeps the 20-credits/MB budget bounded.
 3. The webhook is a trigger, not a data source: the receiver files the delivery in `webhook_inbox`, and a drain re-fetches the transaction with `getTransaction`, because the raw payload's index-form instructions aren't what the decoder reads.
 4. The ingester decodes instructions and Anchor events with `crates/raffles` (IDL-derived Borsh), then upserts idempotently keyed by signature: an append-only `raffle_events` log plus projections (`raffles`, `entry_receipts`, `entry_positions`, `winners`). A transaction delivered on both lanes is a no-op the second time.
-5. Each lane keeps its own cursor, and `last_processed_slot` persists only on `SlotCheckpoint`. Neither lane replays: a WebSocket has no `fromSlot`, so `ResumeFrom::Slot` is only a floor, and a webhook delivery can be lost for good. A second lane narrows the gap, and the signature sweep (flow f) closes it.
+5. Each lane keeps its own cursor, and `last_processed_slot` persists only on `SlotCheckpoint`. Neither lane replays: a WebSocket has no `fromSlot`, so `ResumeFrom::Slot` is only a floor, and a webhook delivery can be lost for good. A second lane narrows the gap, and the signature sweep (flow f) closes it on a cursor of its own.
 6. Transactions are the only signal, on both lanes — no per-PDA `accountSubscribe` in v1. Account state is a fold of the event log; the snapshot sweep (flow f) catches divergence. Fewer subscriptions, fewer credits, one code path to trust.
 
 ### c — Draw lifecycle
@@ -137,7 +137,7 @@ The indexer's as-built reconciliation covers NFT ownership only: a 30-second DAS
 
 | Mechanism | Cadence | What it does |
 | --- | --- | --- |
-| **Signature sweep** | ~10 min | `getSignaturesForAddress(program_id)` from the last checkpoint; fetch and ingest anything either lane missed. The gap closer, and load-bearing, because neither lane replays (PIG-120). |
+| **Signature sweep** | ~10 min | `getSignaturesForAddress(program_id)` from the tip back to the sweep's own cursor; fetch and ingest anything either lane missed. It never starts from a lane's cursor, which has already moved past what that lane missed, and its cursor advances only after a walk reaches it, so a walk cut short repeats. The gap closer, and load-bearing, because neither lane replays (PIG-120). |
 | **Snapshot diff** | hourly | `getProgramAccounts` with discriminator filters, diffed against projections; divergence is logged and repaired (PIG-156). |
 | **Cold start** | on demand | Empty database → `indexer-admin backfill-raffles` replays `getSignaturesForAddress` + `getTransaction` from the program's deploy slot → full rebuild (PIG-159). This is the rebuildability guarantee (§9). NFT ownership continues to come from the existing collection indexer's DAS sweeps. |
 
@@ -148,7 +148,10 @@ Split by volatility instead of fighting the org's `revalidate = 300` convention:
 - **Countdowns poll nothing.** `end_ts` is immutable — SSR delivers it once, a client island ticks locally. Most of the perceived "live data" tension dissolves here.
 - Archives and winners: Server Components, `revalidate = 300` as usual.
 - Active raffle pages: Server Components with a per-route `revalidate = 30`.
-- Live numbers (entry counts, state flips, my entries, eligible entries): client islands polling the API directly every 15–30 s. The browser's HTTP cache revalidates with `If-None-Match` by itself, and a 304 is nearly free on both ends; scripts can't do it by hand, because `ETag` isn't readable cross-origin (§6). Wallet-scoped data is never SSR'd; wallet identity exists only in the browser.
+- Live numbers (entry counts, state flips, my entries, eligible entries): client islands polling the API directly every 15–30 s, each route on the cache semantics §5 declares. Wallet-scoped data is never SSR'd; wallet identity exists only in the browser.
+  - Entry counts and state flips come from public routes with an ETag. The browser's HTTP cache revalidates with `If-None-Match` by itself, and a 304 is nearly free on both ends; scripts can't do it by hand, because `ETag` isn't readable cross-origin (§6).
+  - My entries (`raffle-entries`, `private, max-age=5`) may sit in the browser's private cache for 5 s. That spares a repeat read, not a poll: with no ETag there is nothing to revalidate, so a 15–30 s poll gets a full response.
+  - Eligible entries (`eligible-entries`, `private, no-store`) are never stored, so there is nothing to revalidate and every poll gets a full response.
 
 ### h — Eligible entries
 
@@ -220,7 +223,7 @@ Two keys in two processes on purpose: compromise of the disposable ops key never
 
 **Extend `openapi/v1.yaml` additively** — same file, same service, new `raffles` tag. Adding endpoints is non-breaking under the frozen-v1 rule; the two-step workflow holds and simply gains a second consumer: the contract change ships first and on its own (PIG-118; implementation issues keep `git diff --exit-code openapi/` clean), then explorer *and* raffles re-sync via `pnpm sync:spec`, both with the spec-drift CI check. A separate spec or service was rejected: it would split the contract-of-record and buy nothing — same database, same conventions, same deploy.
 
-All new endpoints inherit the frozen conventions: camelCase with every field required (absence = explicit `null`), cursor `PageInfo`, the `ErrorResponse` envelope, ETag + `Cache-Control`, the contract's `X-RateLimit-*` headers (declared today, enforced once PIG-121 lands), `security: []`, versioning in the server URL.
+All new endpoints inherit the frozen conventions: camelCase with every field required (absence = explicit `null`), cursor `PageInfo`, the `ErrorResponse` envelope, ETag + `Cache-Control`, the contract's `X-RateLimit-*` headers (declared today, enforced once PIG-121 lands), `security: []`, versioning in the server URL. The two wallet routes are the exception on caching: they are `private` and carry no ETag, while the contract says every `GET` returns an ETag and defines `Cache-Control` as "Always `public`", so PIG-118 gives them their own header definitions.
 
 | Endpoint | Purpose | Cache |
 | --- | --- | --- |
@@ -243,7 +246,7 @@ The API already allows any origin (`actix-cors` with `allow_any_origin`; GET, HE
 
 Client islands poll `/v1` directly via `NEXT_PUBLIC_API_BASE_URL`. Server Components keep the server-side `API_BASE_URL` for SSR. Same URL; it stops being a secret, which was always a deployment convenience, not a security property, for a `security: []` API.
 
-**Headers scripts can't read.** The API sets no `Access-Control-Expose-Headers`, so cross-origin scripts can't see `ETag`, `Retry-After` or `X-RateLimit-*`. Revalidation still works, because the browser's HTTP cache sends `If-None-Match` itself (flow g). PIG-121 should expose `Retry-After` and `X-RateLimit-*`; otherwise a client can only back off from a 429 by reading the `ErrorResponse` body.
+**Headers scripts can't read.** The API sets no `Access-Control-Expose-Headers`, so cross-origin scripts can't see `ETag`, `Retry-After` or `X-RateLimit-*`. Revalidation still works on the routes with an ETag, because the browser's HTTP cache sends `If-None-Match` itself (flow g). PIG-121 should expose `Retry-After` and `X-RateLimit-*`; otherwise a client can only back off from a 429 by reading the `ErrorResponse` body.
 
 Why direct beats a Next route-handler proxy: a proxy funnels every client through Vercel egress IPs, collapsing the contracted per-client RateLimit semantics into one bucket — disqualifying on its own; it also costs a function invocation per poll tick and adds a hop, where direct polling with ETags costs the API a 304.
 
@@ -317,7 +320,7 @@ The indexer's founding property — "the entire DB is rebuildable from chain" �
 | NFT ownership (eligibility input) | Chain, via DAS | derived (existing indexer) |
 | Raffle title / short description | **Must ride in `create_raffle` instruction data** (or the Raffle PDA) — flag 1 below | derived |
 | Rules content behind `rules_uri` | Arweave document, committed by `rules_hash` on the Raffle — flag 2 below | cache only |
-| Ingest checkpoint | Operational only, resettable | — |
+| Ingest checkpoints, sweep cursor | Operational only, resettable | — |
 | Crank bookkeeping | None — the crank is stateless by design | — |
 
 > **Flag 1 — title/description:** if these existed only as rows typed into Postgres, rebuildability dies and the API becomes a second source of truth. Requirement for the program team (feeds ALG-585): carry the short title (and a description or its hash) in the `create_raffle` instruction data — instruction data lands in the replayable transaction log, which is enough. Postgres stays a pure fold of chain data.
@@ -349,7 +352,7 @@ Deltas against the project description and the spec's original operational assum
 | R3 | Closed-raffle history depends on archival transaction coverage | Verify Developer-plan archival `getSignaturesForAddress` depth for the program ID; hedge with the `raffle_events` dump (§9) — replay wins on conflict (PIG-159). |
 | R4 | Crank key ops: drained fee payer, runaway retries | Balance alerts on both keys; a retry circuit breaker so a bug can't burn the ops key on priority fees; GM pre-flight checks inventory + SOL and refuses to half-create. |
 | R5 | Switchboard on devnet unproven for us | Validate queue availability + reveal latency in week one of program development — it is ADR-1's revisit trigger, and late discovery stalls ALG-602. |
-| R6 | Public API abuse — CORS is open and no limit is enforced yet; wallet-scoped endpoints are uncacheable and JOIN-heavy | Per-IP rate limiting in actix honoring the contracted `X-RateLimit-*` headers (PIG-121); keep eligible-entries queries indexed and cheap; optionally front public-cacheable routes with a CDN. |
+| R6 | Public API abuse — CORS is open and no limit is enforced yet; wallet-scoped endpoints are JOIN-heavy and can't use a shared cache: `eligible-entries` is `no-store` and `raffle-entries` gets only 5 s in the browser's private cache, so each poll is answered in full (flow g) | Per-IP rate limiting in actix honoring the contracted `X-RateLimit-*` headers (PIG-121); keep eligible-entries queries indexed and cheap; optionally front public-cacheable routes with a CDN. |
 | R7 | Reveal window under congestion — missed reveals cost re-commits | Priority-fee strategy with a congestion mode; monitor reveal-success rate. |
 | R8 | "I just bought this pig, why can't I enter?" — API lag vs chain truth | `asOfSlot` labeling, UI copy, and an on-chain fallback check when a claim fails eligibility the API predicted. |
 | R9 | ~6 proofs/tx is an estimate — compute limits may move it | Coordinate with the program team early; UI batching and the eligible-entries response shape (pre-chunked account triples) depend on it. |

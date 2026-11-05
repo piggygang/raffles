@@ -31,7 +31,7 @@ The two on-chain registries that gate raffle creation in the free model: which a
 | Status | `Proposed` → Reviewed → Accepted<br>acceptance = PIG-88 review; unblocks the registry instructions and the `create_raffle` registry checks in the program repo |
 | Issue | PIG-88 — related: PIG-91 (the feature spec). ALG-numbered issues below are cited exactly as the spec and architecture docs cite them. |
 | Author | Marko Sabec — ALGOLAB |
-| Implements | [Feature spec](./piggygang-raffles-v1-spec.md) (decisions D1–D18 accepted) and [architecture](./piggygang-raffles-architecture.md) — product semantics unchanged; the few mechanical additions are listed in §9 |
+| Implements | [Feature spec 1.6](./piggygang-raffles-v1-spec.md) (decisions D1–D22 accepted) and [architecture](./piggygang-raffles-architecture.md) — product semantics unchanged; the few mechanical additions are listed in §9 |
 | Defers | The rest of the Config and Raffle PDA layouts (ALG-584) · prize escrow mechanics and supported token standards (ALG-585) · admin UI implementation (ALG-600) · API shapes (ALG-593) |
 | Changelog | `1.2 — 2026-11-05` — §3, §8 and §9 follow spec 1.6 (PIG-112)<br>`1.1 — 2026-11-04` — `PrizeKind` 2 `CoreCollection` (PIG-132, spec D22)<br>`1.0 — 2026-10-27` — initial proposal |
 

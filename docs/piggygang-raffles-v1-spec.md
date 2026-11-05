@@ -173,7 +173,7 @@ Two layers with a clear division of authority: **the chain decides, the service 
 - Lookalikes — a pig's name, symbol or update authority without the verified creator, or a Core asset outside the collection. The whole rule is mandatory; DAS spam is filtered by the service and rejected by the program as backstop.
 - Holdings in a different wallet (vaults, cold storage) — v1 entries are bound to the signing wallet; delegate claiming is deferred (D12).
 
-The index can lag the chain: ingest runs a WebSocket lane and a webhook lane side by side, neither replays, and reconciliation sweeps close the gaps. The app labels derived numbers as approximate and always rebuilds claim transactions from chain-consistent data. Races lose cleanly: a receipt that already exists fails that claim with a friendly "this pig was just used" (E-E3, E-I1).
+The index can lag the chain: ingest runs a WebSocket lane and a webhook lane side by side, and neither replays. Repair falls to the signature sweep, the snapshot diff and the cold-start backfill ([architecture](./piggygang-raffles-architecture.md) flow f). None of them exists yet (PIG-120, PIG-156, PIG-159), so until they ship a missed event stays missed. The app labels derived numbers as approximate and always rebuilds claim transactions from chain-consistent data. Races lose cleanly: a receipt that already exists fails that claim with a friendly "this pig was just used" (E-E3, E-I1).
 
 ## §7 — Lifecycle & state machine
 
@@ -418,7 +418,7 @@ The normative behaviour matrix — the rows engineers write tests against (ALG-5
 | E-A2 | Config changed mid-raffle (cap, bonus, membership rules, bounds) | No effect on live raffles — values were snapshotted at create (D14). Applies to future raffles. | — by design |
 | E-A3 | Pause mid-raffle | Per the pause matrix (§10): progression freezes, funds-out stays open, `end_ts` keeps running. | admin |
 | E-A4 | Per-raffle cap override | `create_raffle` takes an optional cap override bounded `1..=snapshot cap` (D6) — GM raffles use cap 1. Snapshotted like everything else. | creator at create |
-| E-A5 | Admin key compromise / rotation | Authority is a Squads multisig on mainnet, handed over at deploy (§10). Member changes stay inside Squads; a new authority takes `set_authority` plus `accept_authority`. Ops runbook in ALG-603. | admin |
+| E-A5 | Admin key compromise / rotation | Authority is a Squads multisig on mainnet, handed over at deploy (§10). Member changes stay inside Squads. Moving to a new authority takes two signatures: the current `Config.authority` signs `set_authority` to propose it, and the new authority signs `accept_authority` to complete the rotation. Ops runbook in ALG-603. | admin |
 | E-A6 | A membership rule must change (e.g. the Core collection migrates, or the legacy collections get certified on-chain — D19 option B, planned as PIG-223) | Live raffles keep their snapshot; a config update fixes future raffles. No instruction mutates a live raffle's membership rules. | admin |
 
 ### F — Infrastructure & app
@@ -556,7 +556,7 @@ Four sign-offs, each owning a slice of this document. Sign-off means: all §14 r
 - [x] D19 (holder proof) added on 2026-11-01 — PIG-111, verified against mainnet.
 - [x] D20 (rules hosting) added on 2026-11-02 — PIG-110; the rules template text still needs the legal reviewer's sign-off.
 - [x] D21 (reclaim caller) and D22 (Core prizes) added on 2026-11-04 — PIG-132, with the Core evidence read from mainnet.
-- [x] Operations revision (1.6) and architecture 1.2 written on 2026-11-05 — PIG-112, checked against the as-built indexer.
+- [x] Operations revision (1.6) and architecture 1.2 written on 2026-11-05 — PIG-112, checked against the as-built indexer. Raffle reconciliation is planned, not built (§6).
 - [ ] Every §11 row has an accepted behaviour — these become the test scenarios of ALG-590 and ALG-602.
 - [x] Issue updates through D19 filed on 2026-11-01, under "Update — Raffles MVP plan" on each issue.
 - [ ] Issue updates for D20–D22, R2's `open_entry_accounts` and PIG-112 filed (list below).
@@ -576,4 +576,4 @@ Four sign-offs, each owning a slice of this document. Sign-off means: all §14 r
 | D20 | `create_raffle` takes `rules_uri` (≤ 96 bytes) and `rules_hash` (`[u8; 32]`), stores both on the Raffle and emits them in `RaffleCreated`; Raffle seeds derivable before creation. The rules page enforces the `ar://<id>` format, verifies the hash and cross-checks the front-matter; `/create` and `raffles-gm` generate and upload per-raffle documents. Details: [rules design](./piggygang-raffles-rules.md) §7. | PIG-86 · PIG-141 · PIG-127 · PIG-165 · PIG-124 · PIG-161 |
 | D21 | `reclaim_prize` takes any signer, pays only `raffle.creator`, and the caller funds a missing creator ATA. The crank reclaims for every raffle, and `raffles-gm` drops its own reclaim. `close_raffle` requires `prize_out` on the Raffle. Details: [prize escrow design](./piggygang-raffles-prize-escrow.md) §7. | PIG-82 · PIG-86 · PIG-153 · PIG-158 · PIG-161 |
 | D22 | Allowlist kind 2 `CoreCollection`; a Core path through `create_raffle`, `claim_prize` and `reclaim_prize`; the plugin check at create. PIG-142 is confirmed with the scope in the [prize escrow design](./piggygang-raffles-prize-escrow.md) §7. | PIG-142 · PIG-140 · PIG-85 · PIG-86 · PIG-73 · PIG-71 · PIG-127 · PIG-119 · PIG-136 |
-| PIG-112 | CORS stays allow-any, and the API exposes `Retry-After` and `X-RateLimit-*` to scripts. The raffles program id joins the indexer's tracked-address list: one filter, both lanes. `raffles-crank` and `raffles-gm` run on Railway's default `ON_FAILURE` and supervise themselves, because IaC can't set `ALWAYS`. Details: [architecture](./piggygang-raffles-architecture.md) §3b, §4, §6. | PIG-121 · PIG-122 · PIG-130 · PIG-134 |
+| PIG-112 | CORS stays allow-any, and the API exposes `Retry-After` and `X-RateLimit-*` to scripts. The raffles program id joins the indexer's tracked-address list: one filter, both lanes. `raffles-crank` and `raffles-gm` run on Railway's default `ON_FAILURE` and supervise themselves, because IaC can't set `ALWAYS`. The signature sweep keeps its own cursor, not a lane's. The contract gets its own cache headers for the two wallet routes, which are `private` with no ETag. Details: [architecture](./piggygang-raffles-architecture.md) §3b, §3f, §4, §5, §6. | PIG-118 · PIG-120 · PIG-121 · PIG-122 · PIG-130 · PIG-134 |
