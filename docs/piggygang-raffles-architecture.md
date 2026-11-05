@@ -161,7 +161,7 @@ Split by volatility instead of fighting the org's `revalidate = 300` convention:
 
 ### h — Eligible entries
 
-Computed entirely in `services/api` against Postgres — no chain call in the request path: the wallet's held Piggies (existing ownership tables, DAS-reconciled) minus mints with an `EntryReceipt` for this raffle, intersected with the raffle's snapshotted membership rules, then cap-remaining and Full-Gang-bonus preview from the wallet's `EntryPosition`. An optional `exclude` list drops mints the client ruled out or couldn't confirm on-chain, so the next eligible mints can surface (spec §6). The response carries `asOfSlot`; a just-bought pig may lag until ownership catches up, but the claim transaction carries the on-chain proof — the API can only under- or over-promise the UI, never affect correctness. The claim transactions also need each Token Metadata pig's token account, which the indexer doesn't store yet (PIG-135).
+Computed entirely in `services/api` against Postgres — no chain call in the request path: the wallet's held Piggies (existing ownership tables, DAS-reconciled) minus mints with an `EntryReceipt` for this raffle, intersected with the raffle's snapshotted membership rules, then cap-remaining and Full-Gang-bonus preview from the wallet's `EntryPosition`. An optional `exclude` list drops mints the client ruled out or couldn't confirm on-chain, so the next eligible mints can surface (spec §6). Cap-remaining limits only the mints picked for the allowance: completing mints come on top, one per collection the wallet still needs for Full Gang, even at zero allowance (spec §6, E-E16). The response carries `asOfSlot`; a just-bought pig may lag until ownership catches up, but the claim transaction carries the on-chain proof — the API can only under- or over-promise the UI, never affect correctness. The claim transactions also need each Token Metadata pig's token account, which the indexer doesn't store yet (PIG-135).
 
 ## §4 — Deployment topology
 
@@ -238,7 +238,7 @@ All new endpoints inherit the frozen conventions: camelCase with every field req
 | `GET /v1/raffles/{address}/entries?cursor=` | Entry positions and ranges (draw verification) | public, max-age=15 + ETag |
 | `GET /v1/winners?cursor=` | History: prize, winner, entries, proof — the transparency page | public, max-age=300 + ETag |
 | `GET /v1/wallets/{address}/raffle-entries?cursor=` | My entries across raffles, odds, claimables, closeable rent | private, max-age=5 |
-| `GET /v1/wallets/{address}/eligible-entries?raffle=&exclude=` | Flow h — eligible mints, cap remaining, bonus preview, `asOfSlot` | private, no-store |
+| `GET /v1/wallets/{address}/eligible-entries?raffle=&exclude=` | Flow h — eligible and completing mints, cap remaining, bonus preview, `asOfSlot` | private, no-store |
 | `GET /v1/raffles-config` | Prize Allowlist, Creator Registry, config snapshot values, pause state | public, max-age=60 + ETag |
 | `GET /v1/raffles-config/changes?cursor=` | Admin change log: registry, authority and config events | public, max-age=60 + ETag |
 
