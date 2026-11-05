@@ -54,7 +54,7 @@ Four repos, four responsibilities. The backend is the existing `piggygang/indexe
 | **piggygang/raffles-services**<br>`Rust · Railway · new` | New | The automation service: draw crank, VRF commit–reveal driver, settlement sweeps, GM raffle scheduler. Own repo, own Railway project, mirrors the indexer's build conventions (Dockerfile, config style, CI). Ships two binaries, so each process holds exactly one hot key: `raffles-crank` (`CRANK_KEYPAIR`) and `raffles-gm` (`GM_CREATOR_KEYPAIR`). Stateless — no database of its own, nothing durable (§3c). |
 | **piggygang/raffles**<br>`Next.js · Vercel · this repo` | Extended | The frontend at `raffles.piggygang.net` (already reserved in the website's app registry, accent `#3ddad7`). Explorer-style clone: vendored OpenAPI spec, generated `openapi-fetch` client, Server Components, DressMe look — plus the org's first transaction-signing wallet code, extended from dressme's `lib/wallet.ts`. |
 
-> **Retired:** the `piggygang-raffles-application` monorepo (Next.js + Rust serverless functions on Vercel) and Vercel Cron. No Vercel serverless functions exist anywhere in this design; server-side compute is Railway, full stop.
+> **Retired:** the `piggygang-raffles-application` monorepo (Next.js + Rust serverless functions on Vercel) and Vercel Cron. Next.js rendering and ISR still run on Vercel, but this design adds no custom API or cron functions there: application server-side compute is Railway, full stop.
 
 ## §2 — The big picture
 
@@ -137,7 +137,7 @@ The indexer's as-built reconciliation covers NFT ownership only: a 30-second DAS
 
 | Mechanism | Cadence | What it does |
 | --- | --- | --- |
-| **Signature sweep** | ~10 min | `getSignaturesForAddress(program_id)` from the tip back to the sweep's own cursor; fetch and ingest anything either lane missed. It never starts from a lane's cursor, which has already moved past what that lane missed, and its cursor advances only after a walk reaches it, so a walk cut short repeats. The gap closer, and load-bearing, because neither lane replays (PIG-120). |
+| **Signature sweep** | ~10 min | `getSignaturesForAddress(program_id)` from the tip back to the sweep's own cursor; fetch and ingest anything either lane missed. It never starts from a lane's cursor, which has already moved past what that lane missed. Its cursor moves up to the walk's newest signature only after every signature in the range is durably ingested: a failed fetch or ingest leaves it in place, so that signature stays retryable and a walk cut short repeats on the next sweep. The gap closer, and load-bearing, because neither lane replays (PIG-120). |
 | **Snapshot diff** | hourly | `getProgramAccounts` with discriminator filters, diffed against projections; divergence is logged and repaired (PIG-156). |
 | **Cold start** | on demand | Empty database → `indexer-admin backfill-raffles` replays `getSignaturesForAddress` + `getTransaction` from the program's deploy slot → full rebuild (PIG-159). This is the rebuildability guarantee (§9). NFT ownership continues to come from the existing collection indexer's DAS sweeps. |
 
@@ -164,7 +164,7 @@ Two Railway projects plus Vercel. The indexer project stays exactly what it is �
 ```mermaid
 flowchart LR
     subgraph VercelBox["Vercel"]
-        FE["piggygang/raffles · Next.js<br>prod → raffles.piggygang.net<br>previews → devnet API + RPC<br>zero-config · no serverless functions"]
+        FE["piggygang/raffles · Next.js<br>prod → raffles.piggygang.net<br>previews → devnet API + RPC<br>zero-config · rendering + ISR<br>no custom API or cron functions"]
     end
     subgraph IndexerBox["Railway — indexer project<br>EU West Metal · Amsterdam · ams<br>production live · devnet planned · no signing keys"]
         APIsvc["api<br>api.indexer.piggygang.net<br>/v1 + CORS"]
@@ -205,13 +205,13 @@ flowchart LR
 | `raffles-crank` | raffles-services | `raffles-crank` | `ON_FAILURE`, self-supervising | `/health` (PIG-122) | none — API hints + RPC | `CRANK_KEYPAIR` |
 | `raffles-gm` | raffles-services | `raffles-gm` | `ON_FAILURE`, self-supervising | `/health` (PIG-122) | none — API hints + RPC | `GM_CREATOR_KEYPAIR` |
 
-**Restart policy can't be set through IaC.** `config apply` silently drops `restartPolicyType` (indexer `.railway/railway.ts`, checked 2026-08-31), so every service runs on Railway's default `ON_FAILURE`. A long-running binary therefore supervises itself: it retries forever, exits non-zero only for config or database failures, and a watchdog exits if it stops making progress. `raffles-services` follows the same pattern, which replaces the `ALWAYS` in PIG-122.
+**Restart policy can't be set through IaC.** `config apply` silently drops `restartPolicyType` and `restartPolicyMaxRetries` (indexer `.railway/railway.ts`, checked 2026-08-31), so every service runs on Railway's default: `ON_FAILURE`, at most 10 restarts. A healthcheck only gates a deploy and never restarts a running service. A long-running binary therefore supervises itself: it restarts its own loops with a capped backoff, forever, and a watchdog restarts a loop that stops making progress, all in-process, so none of it spends a Railway restart. It exits non-zero only for config or database failures at boot, which a restart can't fix. That is how a service ends up stopped: once the 10 restarts are spent, Railway marks the deployment `Crashed`, notifies project members and leaves it down. Recovery is manual: fix the cause, and a variable change redeploys on its own; for anything else, use Redeploy or Restart on the crashed deployment. `raffles-services` follows the same pattern, which replaces the `ALWAYS` in PIG-122.
 
 ### Environment variables
 
 | Scope | Variables |
 | --- | --- |
-| Shared concept (both projects) | `SOLANA_CLUSTER` (`devnet \| mainnet-beta`) · `SOLANA_RPC_URL` · `SOLANA_WS_URL` · `RUST_LOG` — explicit URLs, not derived, so a provider swap is a config change. Parsed fail-fast (indexer `crates/config` style: missing → default, unparseable → hard error). |
+| Shared concept (both projects) | `SOLANA_CLUSTER` (`devnet \| mainnet-beta`) · `SOLANA_RPC_URL` · `SOLANA_WS_URL` · `RUST_LOG` — explicit URLs, not derived, so a provider swap is a config change. Parsed fail-fast (indexer `crates/config` style: missing → default, unparseable → hard error), except that backend services require `SOLANA_CLUSTER`. Startup fails if it is missing, or if the selected cluster's endpoints or per-cluster program config are missing or disagree with it, because a default could silently point a service, hot keys included, at the wrong cluster. A cluster without the program yet says so in its `raffles.toml`, so this doesn't make the refactor wait for the program (§8). The frontend's separate devnet default stays. |
 | indexer project | `PORT`/`HOST` (api, ingester) · `HELIUS_API_KEY` · `DATABASE_URL=${{Postgres.DATABASE_URL}}` reference var, private networking, rustls · ingester only: `INGEST_TRANSPORTS=ws,webhook`, `HELIUS_WEBHOOK_SECRET`, `WEBHOOK_URL`. The raffles program id lives in a per-cluster `raffles.toml`, not an env var: the indexer keeps on-chain addresses in `config/` (PIG-134). |
 | `raffles-crank` (secret) | **`CRANK_KEYPAIR`** — disposable ops/fee-payer key: rotate freely, hold ~0.1–0.5 SOL, balance-alerted. Plus `RAFFLES_PROGRAM_ID`, `SWITCHBOARD_QUEUE`, priority-fee knobs. Env-only, never in a repo, never on Vercel. |
 | `raffles-gm` (secret) | **`GM_CREATOR_KEYPAIR`** — creator-registry member with on-chain identity and GM prize inventory; rotation is an admin registry op. Plus `RAFFLES_PROGRAM_ID`, `GM_SCHEDULE`. Env-only, never in a repo, never on Vercel. |
@@ -306,7 +306,7 @@ The indexer has no cluster concept today. It hardcodes mainnet Helius hosts (`cr
 - **Two Railway environments per project** (`production` = mainnet, `devnet`; only the indexer's `production` exists today, PIG-116 and PIG-122 add the rest), each with its own Postgres (indexer project) and its own variables — same code, same config files, only values differ (devnet program ID, devnet keys with airdropped SOL, same Helius key). A separate Railway project per cluster was rejected (duplicated setup, no extra isolation); a single deployment with env-var switching was rejected (a mainnet ingester can't also watch devnet, and E2E must never touch production Postgres).
 - **Development ladder:** Anchor localnet with a mocked randomness account for program tests → devnet with real Switchboard On-Demand for the full loop → ALG-602 E2E against the devnet Railway environment: seed registry → create → claim → short-duration end → crank draws → assert winner via `GET /v1/raffles/{address}` → sweep closes → assert rent returned.
 - **Frontend:** Vercel previews point `NEXT_PUBLIC_API_BASE_URL` + `NEXT_PUBLIC_SOLANA_RPC_URL` at devnet; production points at mainnet.
-- **Ordering constraint:** the cluster-config refactor (PIG-113, PIG-134) lands before the ingester's raffles subscription and before the devnet environment is provisioned (PIG-116). It doesn't need the program, so it can start any time. The mainnet domain is done: `api.indexer.piggygang.net` serves production and the contract's `servers` block names it. The devnet domain arrives with PIG-116.
+- **Ordering constraint:** the cluster-config refactor (PIG-113, PIG-134) lands before the ingester's raffles subscription and before the devnet environment is provisioned (PIG-116). It doesn't need the program, so it can start any time, but `SOLANA_CLUSTER` has to be set in production before it deploys: the variable is required (§4), and a merge never applies `.railway/railway.ts`. The mainnet domain is done: `api.indexer.piggygang.net` serves production and the contract's `servers` block names it. The devnet domain arrives with PIG-116.
 
 ## §9 — Rebuildability audit
 
