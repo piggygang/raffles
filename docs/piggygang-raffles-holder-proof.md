@@ -190,7 +190,7 @@ Distinct rules could in principle still overlap. An NFT sets at most one bit, be
 - **B — certify the collections on-chain.** This means minting two collection NFTs and running `set_and_verify_collection` on every live mint: 13,134 transactions today (the issue's 15,000 predates the burns), each signed by the update authority. It is the cleanest end state, and the Girl Gang Image Rehost already plans a 5,000-mint metadata update it could ride on.
   - Not taken for v1, because it puts a mainnet migration in front of program work while SOL Gang keeps shrinking through the Core migration.
   - The way back: implement `TmCollection` (kind 2) and switch the slots with `update_config`, while live raffles keep their snapshot. If kind 2 isn't built in v1, the switch takes a program upgrade. Either way, no account migrates.
-  - Since planned as PIG-223. `set_and_verify_collection` writes only the `collection` field, so the creator rules keep matching through it, and raffles can switch whenever kind 2 is built.
+  - Since planned as PIG-223. `set_and_verify_collection` writes only the `collection` field, so the creator rules keep matching through it. Building kind 2 doesn't make the switch safe on its own: a collection's slot can move to kind 2 only once every live mint in that collection is verified, because new raffles snapshot the rule and would reject any pig still unverified.
 - **C — a Merkle allowlist of mints.** Rejected. 15,000 leaves need a 14-level proof, which is 448 bytes per NFT. That breaks the budget of about 6 NFTs per 1,232-byte transaction.
 
 ## §7 — Hand-offs
