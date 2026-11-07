@@ -170,4 +170,4 @@ Made in this revision of the [spec](./piggygang-raffles-v1-spec.md):
 
 Also changed: registries §3, §4, §5, §7c, §7e and §11 Q2, and in the rules design and template the Core values of `prize.mint` and `prize.escrow`.
 
-Left for PIG-112: architecture §9's "Raffle PDA + escrow ATA" row gains the Core case, and flow d's sweep gains Drawn raffles past the backstop. Flow d already matches D21.
+Applied by PIG-112: architecture §9's "Raffle PDA + escrow ATA" row now covers the Core case, and flow d follows D21 and sweeps Drawn raffles past the backstop.

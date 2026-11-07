@@ -1,6 +1,6 @@
 # PiggyGang Raffles — Rules publishing
 
-Every raffle carries published rules (spec Invariant 2, D16). This document decides where the rules document lives, how the chain commits to its exact bytes, what the document contains, and how the browser and the GM crank publish it. The template itself is [`piggygang-raffles-rules-template.md`](./piggygang-raffles-rules-template.md).
+Every raffle carries published rules (spec Invariant 2, D16). This document decides where the rules document lives, how the chain commits to its exact bytes, what the document contains, and how the browser and `raffles-gm` publish it. The template itself is [`piggygang-raffles-rules-template.md`](./piggygang-raffles-rules-template.md).
 
 - **Issue:** PIG-110
 - **Status:** decided — spec D20; the template text is a draft pending legal review (§9)
@@ -28,14 +28,14 @@ Every raffle carries published rules (spec Invariant 2, D16). This document deci
 | Status | `Decided` — hosting, hash, format and GM approach (spec D20). Template text: `Draft` until the legal reviewer signs off (§9). |
 | Issue | PIG-110 — blocks PIG-112 (spec revision), PIG-124 and PIG-161 (GM scheduler and publishing), PIG-127 (rules page), PIG-141 (`create_raffle` rules fields); related PIG-85, PIG-86, PIG-165, PIG-65, PIG-138 |
 | Author | Marko Sabec — ALGOLAB |
-| Defers | Raffle PDA layout and seeds (PIG-86) · `create_raffle` instruction layout (PIG-141) · rules page and upload UI (PIG-127, PIG-165) · crank implementation (PIG-161) |
+| Defers | Raffle PDA layout and seeds (PIG-86) · `create_raffle` instruction layout (PIG-141) · rules page and upload UI (PIG-127, PIG-165) · `raffles-gm` implementation (PIG-161) |
 | Changelog | `1.0 — 2026-11-02` — decision, format and template draft |
 
 **What this document is authoritative for:** the rules hosting choice, the `rules_hash` definition and verification, the front-matter schema, the template rules, and the publishing order for both creators.
 
 ## §1 — The answers
 
-- **Hosting: permanent Arweave storage, uploaded through ArDrive Turbo.** Irys, the issue's suggestion, stopped uploading to Arweave on 2026-11-01 (§2). The creator's wallet signs and pays for the upload in SOL; the GM crank pays from the GM key.
+- **Hosting: permanent Arweave storage, uploaded through ArDrive Turbo.** Irys, the issue's suggestion, stopped uploading to Arweave on 2026-11-01 (§2). For an ordinary raffle the creator's wallet signs and pays for the upload in SOL. For a Squads raffle the proposer's own wallet does, because the vault can't sign an upload (§5b). `raffles-gm` signs and pays with the GM key.
 - **Integrity: a `rules_hash` on the Raffle.** It is the sha256 of the exact document bytes, passed to `create_raffle` and stored next to `rules_uri`. The app renders rules only when the fetched bytes hash to it. The hash is the commitment; Arweave only provides availability, so any copy that matches is authentic (§3).
 - **Format: Markdown with YAML front-matter.** The front-matter holds machine-readable terms that the rules page cross-checks against the chain. The body is the human-readable rules, generated from a fixed, logic-free template (§4).
 - **GM raffles: one document per raffle,** generated and uploaded by `raffles-gm` with the same template. A standing document per cadence would leave the prize and dates to chain lookups, which is exactly what needed legal sign-off; per-raffle documents need no special approval and cost almost nothing (§6).
@@ -136,7 +136,7 @@ YAML restricted to the JSON subset in block style: maps, double-quoted strings a
 - **Escaping depends on where the placeholder sits.** In the front-matter, values are JSON-escaped. In the body, the organizer's text (`title`, `description`, `organizer.*`) has Markdown control characters escaped. Chain values (addresses, integers, the timestamp) are validated formats and go in verbatim.
 - **Organizer text renders as plain text.** The rules page renders the body with raw HTML disabled, and organizer-supplied links aren't made clickable.
 - **The description goes last,** under a heading that says it can't change the numbered rules above it.
-- **The output is deterministic.** The same inputs give the same bytes, so a failed create retried with the same inputs reuses the same document and hash. The browser generator (TypeScript, PIG-165) and the crank's (Rust, PIG-161) must agree byte for byte, which a shared golden test vector proves: inputs → document → sha256.
+- **The output is deterministic.** The same inputs give the same bytes, so a failed create retried with the same inputs reuses the same document and hash. The browser generator (TypeScript, PIG-165) and the one in `raffles-gm` (Rust, PIG-161) must agree byte for byte, which a shared golden test vector proves: inputs → document → sha256.
 - **The template is versioned.** `schema` names the template version that produced a document. Template text changes only with legal sign-off, and bumps the version.
 
 ### Permanence and personal data
@@ -165,20 +165,20 @@ So the creator sees two or three prompts. Turbo is a third-party service, not ou
 
 A vault can't sign a Turbo upload. The proposer uploads the document with their own wallet, and the vault transaction carries the hash. Who uploaded doesn't matter: the hash in the creator-signed transaction is the binding.
 
-### c — GM crank (PIG-161)
+### c — `raffles-gm` (PIG-161)
 
 1. **Pre-flight:** prize inventory, SOL balance and the upload price. If any check fails, skip the period ("refuses to half-create", architecture §3e).
 2. **Generate the document** for this period, upload it signed by `GM_CREATOR_KEYPAIR`, and pay from that key's SOL.
 3. **Send `create_raffle`.**
-4. **On a retry within the period,** the same inputs give the same bytes. The crank is stateless, so re-uploading is fine; the cost is negligible and the orphan is harmless.
+4. **On a retry within the period,** the same inputs give the same bytes. `raffles-gm` is stateless, so re-uploading is fine; the cost is negligible and the orphan is harmless.
 
-Turbo's SDK is TypeScript, and the crank is Rust. PIG-161 either signs ANS-104 data items in Rust against Turbo's HTTP upload API, or calls a small pinned Node helper. That choice belongs to the crank team, as long as the output bytes match the golden vector.
+Turbo's SDK is TypeScript, and `raffles-gm` is Rust. PIG-161 either signs ANS-104 data items in Rust against Turbo's HTTP upload API, or calls a small pinned Node helper. That choice belongs to the services team, as long as the output bytes match the golden vector.
 
 ## §6 — GM raffles
 
 | Option | Legal artifact | Ops | Verdict |
 | --- | --- | --- | --- |
-| **One document per raffle, from the crank** | Self-contained: names this prize, these dates, this raffle | One ~6 KB upload per raffle, about 420 a year at daily + weekly | **Chosen** |
+| **One document per raffle, from `raffles-gm`** | Self-contained: names this prize, these dates, this raffle | One ~6 KB upload per raffle, about 420 a year at daily + weekly | **Chosen** |
 | One standing document per cadence | Incomplete without chain lookups for the prize and dates | One upload per template version | Rejected: needs the legal reviewer to accept an incomplete artifact, to save a negligible cost |
 
 The architecture's per-period idempotency tag could double as the raffle nonce for GM. Seeds `[b"raffle", gm_creator, period_tag]` would make a second create in the same period fail at `init`, and would give the document its raffle address deterministically.
@@ -212,7 +212,7 @@ Made in this revision of the [spec](./piggygang-raffles-v1-spec.md):
 | §15 | `rules_hash` entry |
 | §16 | D20 checklist line and issue-update row |
 
-Left for PIG-112: architecture §9 flag 2 becomes "resolved by spec D20: Arweave via Turbo plus `rules_hash` on the Raffle".
+Applied by PIG-112: architecture §9 flag 2 now reads "resolved by spec D20: Arweave via Turbo plus `rules_hash` on the Raffle".
 
 ## §9 — Open questions for the legal reviewer
 
