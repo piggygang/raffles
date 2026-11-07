@@ -547,14 +547,14 @@ Pointer for reviewers: the v2 direction (Merkle snapshot entry mode) is designed
 
 ## §16 — Sign-off
 
-Four sign-offs, each owning a slice of this document. Sign-off means: all §14 rows resolved, all §11 rows accepted, and the issue updates below filed.
+Four sign-offs, each owning a slice of this document. Sign-off means: all §14 rows resolved, all §11 rows accepted, and the issue updates below filed. Each row records who signed and when (PIG-138).
 
-| Role | Signs off on | Status |
-| --- | --- | --- |
-| **Program engineer** | §5–§11 and D19 — states, transitions, instruction inventory, edge-case matrix | pending |
-| **Frontend engineer** | §5, §6, §12 — entry flows, service contract, CTA table, error UX | pending |
-| **DAO admin** | §3, §4, §10, §14 — types, cadence, registries, config values, tax process | pending |
-| **Legal reviewer** | §2 invariants, §9 rent guarantees, §12 legal elements, §13 exclusions, the [rules template](./piggygang-raffles-rules-template.md) | pending |
+| Role | Signs off on | Signed off by | Date |
+| --- | --- | --- | --- |
+| **Program engineer** | §5–§11 and D19 — states, transitions, instruction inventory, edge-case matrix | pending | — |
+| **Frontend engineer** | §5, §6, §12 — entry flows, service contract, CTA table, error UX | pending | — |
+| **DAO admin** | §3, §4, §10, §14 — types, cadence, registries, config values, tax process | pending | — |
+| **Legal reviewer** | §2 invariants, §9 rent guarantees, §12 legal elements, §13 exclusions, the [rules template](./piggygang-raffles-rules-template.md) | pending | — |
 
 ### Checklist
 
