@@ -33,7 +33,7 @@ The two on-chain registries that gate raffle creation in the free model: which a
 | Author | Marko Sabec — ALGOLAB |
 | Implements | [Feature spec 1.6](./piggygang-raffles-v1-spec.md) (decisions D1–D22 accepted) and [architecture](./piggygang-raffles-architecture.md) — product semantics unchanged; the few mechanical additions are listed in §9 |
 | Defers | The rest of the Config and Raffle PDA layouts (ALG-584) · prize escrow mechanics and supported token standards (ALG-585) · admin UI implementation (ALG-600) · API shapes (ALG-593) |
-| Changelog | `1.2 — 2026-11-05` — §3, §8 and §9 follow spec 1.6 (PIG-112)<br>`1.1 — 2026-11-04` — `PrizeKind` 2 `CoreCollection` (PIG-132, spec D22)<br>`1.0 — 2026-10-27` — initial proposal |
+| Changelog | `1.2 — 2026-11-05` — §3, §8 and §9 follow spec 1.6, and the §8 mirrors are read from chain (PIG-112)<br>`1.1 — 2026-11-04` — `PrizeKind` 2 `CoreCollection` (PIG-132, spec D22)<br>`1.0 — 2026-10-27` — initial proposal |
 
 **What this document is authoritative for:** the byte layout and seeds of the registry accounts; the registry and authority instructions and their validation; the registry checks inside `create_raffle`; the admin authority setup; the admin runbooks.
 
@@ -351,7 +351,7 @@ Same instructions, with a single dev keypair as authority. `/admin` signs direct
 
 ### Indexer
 
-- **Projections:** `prize_allowlist (kind, address, added_at, added_slot)` and `creator_registry (wallet, label, added_at, added_slot)`. Rows are inserted on the add events and deleted on the remove events, while the events themselves append to the existing `raffle_events` log. That log is the change-log source.
+- **Projections:** `prize_allowlist (kind, address, added_at)` and `creator_registry (wallet, label, added_at)`, copied from the live entry accounts. The events don't write the rows, because a remove and a re-add in one slot can't be ordered: an add or remove event flags the mirror, and the ingester re-reads the live set (architecture §3b). The events themselves append to the existing `raffle_events` log. That log is the change-log source.
 - **Mainnet registry ops arrive as CPIs** from Squads' `vault_transaction_execute`, not as top-level instructions. The raffles decoder in `crates/raffles` must therefore read inner instructions and events. The ingester's address filter should still match, since the invoked program appears among the transaction's accounts. ALG-623 should test this, including a vault transaction that loads accounts through an address lookup table.
 - **Rebuildability holds** (architecture §9, "Allowlist, registry" row). The live set is a `getProgramAccounts` discriminator scan over two small account types; the history is the transaction log.
 
